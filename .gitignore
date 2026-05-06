@@ -1,0 +1,32 @@
+# CCS theia / project build 
+build/
+Debug/
+Release/
+*.obj
+*.o
+*.out
+*.hex
+*.bin
+*.map
+*.d
+
+# SysConfig generated files 
+ti_msp_dl_config.c
+ti_msp_dl_config.h
+device_linker.cmd
+device.cmd.genlibs
+
+# IDE and settings
+.theia/
+.vscode/
+.settings/
+*.launch
+*.user
+*.ccxml.local
+
+# Hardware/Debug config 
+!*.ccxml
+
+# OS specific
+.DS_Store
+Thumbs.db
