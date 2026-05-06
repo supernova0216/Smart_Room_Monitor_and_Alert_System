@@ -44,8 +44,10 @@
 #include <task.h>
 
 #include <unistd.h>
-#include <semaphore.h>
+#include <semaphore.h>      //POSIX
 #include <stdlib.h>
+#include <system.h>         //shared set up SystemState
+#include <stdarg.h>         //UART_print
 
 /* TI includes for driver configuration */
 #include "ti_msp_dl_config.h"
@@ -55,16 +57,30 @@ extern void *Thread(void *arg0);
 /* Stack size in bytes */
 #define THREADSTACKSIZE 1024
 
-//set up ADC & Sensor Reading Module
+/*set up ADC & Sensor Reading Module
+float readTemperatureC(void);
+float readLightPercent(void);
+void *adcTask(void *arg);
+*/
 
 
-//set up Timer & Periodic Sampling
+/*set up Timer & Periodic Sampling
+extern volatile bool sampleNow;
+void *timerTask(void *arg);
+void timer_clearFlag(void);
+*/
 
 
-//set up Processing, Threshold Logic & Alert Detection
+/*set up Processing, Threshold Logic & Alert Detection
+SystemStatus processSensors(float temp, float light);
+void *processingTask(void *arg);
+*/
 
 
-//set up LED Control + Button Handling
+/*set up LED Control + Button Handling
+void updateLEDs(SystemStatus status);
+void *ledButtonTask(void *arg);
+*/
 
 
 //set up UART controller 
@@ -82,7 +98,26 @@ static const DL_UART_Main_Config gUART_0Config = {
     .wordLength = DL_UART_MAIN_WORD_LENGTH_8_BITS,
     .stopBits = DL_UART_MAIN_STOP_BITS_ONE
 };
-
+//UART helper funcs
+void UART_sendChar (char c) {
+    while (DL_UART_isTXFIFOFull(UART0));    //wait until TX is ready
+    DL_UART_Main_transmitData(UART0, c);    //echo  
+}
+void UART_sendString (char *str) {
+    int i = 0;
+    while (str[i] != '\0'){
+        UART_sendChar(str[i]);  //wait til TX buffer not full and send one character to UART
+        i++; 
+    }
+}
+void UART_print(char *msg, ...) {
+    char buffer[128];       
+    va_list args;       //holds var passed arguments
+    va_start(args, msg);        //initialize args to point to first variable argument
+    vsnprintf(buffer, sizeof(buffer), msg, args);       //format the string into buffer, preventing overflow
+    va_end(args);       //cleanup handling
+    UART_sendString(buffer);
+}
 
 /* Set up the hardware ready to run this demo */
 static void prvSetupHardware(void) {
@@ -102,7 +137,7 @@ static void prvSetupHardware(void) {
 
 
 //task function: UART Communication
-void *echoUARTTask (void *arg0) {
+void *UARTTask (void *arg0) {
     //initalize UART hardware
     DL_UART_Main_reset(UART0);
     DL_UART_Main_enablePower(UART0);
@@ -120,13 +155,40 @@ void *echoUARTTask (void *arg0) {
     DL_GPIO_initPeripheralOutputFunction(IOMUX_PINCM21, IOMUX_PINCM21_PF_UART0_TX);
     DL_GPIO_initPeripheralInputFunction(IOMUX_PINCM22, IOMUX_PINCM22_PF_UART0_RX);
 
+    //string
+    UART_sendString("System Started\r\n");
+
     while (1) {
-        if (!DL_UART_isRXFIFOEmpty(UART0)) {     //if UART received something in RX
-            char c;
-            c = DL_UART_Main_receiveData(UART0);     //read the received character   
-            while (DL_UART_isTXFIFOFull(UART0));    //wait until TX is ready
-            DL_UART_Main_transmitData(UART0, c);    //echo  
+        //for testing purposes - delete once all tasks combined
+        systemValue.temperature += 0.5;
+        systemValue.light += 1.0;
+        systemValue.status = NORMAL;
+        systemValue.sampleNow = true; //timer trigger
+
+
+        //only print when new sample is ready
+        if(systemValue.sampleNow) {
+            systemValue.sampleNow = false;
+            
+            //read sensor
+            //systemValue.temperature = readTemperature();
+            //systemValue.light = readLightPercent();
+
+            //process logic
+            //systemValue.status = processSensors(systemValue.temperature, systemValue.light);
+
+            //update LEDs
+            //updateLEDs(systemValue.status);
+
+            //alternative to print float since UART can only send int
+            int temp_int =  (int) systemValue.temperature;
+            int temp_decimal = (int) ((systemValue.temperature - temp_int) * 100);
+            
+            //UART_print("Test int: %d\r\n", 123);      //test to check UART_print
+            UART_print("Temperature: %d.%02d C | Light: %d %%| Status: %d\r\n",
+                        temp_int, temp_decimal, (int) (systemValue.light), systemValue.status);
         }
+        vTaskDelay(pdMS_TO_TICKS(900));     //prevent CPU hogging, printing speed
     }
     return NULL;
 }
@@ -134,7 +196,7 @@ void *echoUARTTask (void *arg0) {
 
 int main(void)
 {
-    pthread_t thread_echoUART;
+    pthread_t thread_UART;
     pthread_attr_t attrs;
     struct sched_param priParam;
     int retc;
@@ -161,18 +223,24 @@ int main(void)
         while (1) {
         }
     }
-
-    retc = pthread_create(&thread_echoUART, &attrs, echoUARTTask, NULL);
+    //create UART task 
+    retc = pthread_create(&thread_UART, &attrs, UARTTask, NULL);
     if (retc != 0) {
         /* pthread_create() failed */
-        printf("Falied to create echo UART task\n");
+        printf("Falied to create UART task\n");
         while (1) {
         }
     }
+
+
+    //timerTask
+    //adcTask
+    //processingTask
+    //LEDTask
+
 
     /* Start the FreeRTOS scheduler */
     vTaskStartScheduler();
 
     return (0);
 }
-
