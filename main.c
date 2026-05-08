@@ -48,6 +48,7 @@
 #include <stdlib.h>
 #include <system.h>         //shared set up SystemState
 #include <stdarg.h>         //UART_print
+#include <timer_module.h>   
 
 /* TI includes for driver configuration */
 #include "ti_msp_dl_config.h"
@@ -61,13 +62,6 @@ extern void *Thread(void *arg0);
 float readTemperatureC(void);
 float readLightPercent(void);
 void *adcTask(void *arg);
-*/
-
-
-/*set up Timer & Periodic Sampling
-extern volatile bool sampleNow;
-void *timerTask(void *arg);
-void timer_clearFlag(void);
 */
 
 
@@ -127,9 +121,6 @@ static void prvSetupHardware(void) {
 //task function: ADC & Sensor Reading Module
 
 
-//task function: Timer & Periodic Sampling
-
-
 //task function: Processing, Threshold Logic & Alert Detection
 
 
@@ -160,16 +151,18 @@ void *UARTTask (void *arg0) {
 
     while (1) {
         //for testing purposes - delete once all tasks combined
-        systemValue.temperature += 0.5;
+        /*systemValue.temperature += 0.5;
         systemValue.light += 1.0;
         systemValue.status = NORMAL;
         systemValue.sampleNow = true; //timer trigger
+        */
 
 
         //only print when new sample is ready
         if(systemValue.sampleNow) {
             systemValue.sampleNow = false;
-            
+            UART_print("Timer tick\r\n");       //testing timer - remove once finished
+
             //read sensor
             //systemValue.temperature = readTemperature();
             //systemValue.light = readLightPercent();
@@ -188,6 +181,7 @@ void *UARTTask (void *arg0) {
             UART_print("Temperature: %d.%02d C | Light: %d %%| Status: %d\r\n",
                         temp_int, temp_decimal, (int) (systemValue.light), systemValue.status);
         }
+        
         vTaskDelay(pdMS_TO_TICKS(900));     //prevent CPU hogging, printing speed
     }
     return NULL;
@@ -196,7 +190,7 @@ void *UARTTask (void *arg0) {
 
 int main(void)
 {
-    pthread_t thread_UART;
+    pthread_t thread_UART, thread_Timer;
     pthread_attr_t attrs;
     struct sched_param priParam;
     int retc;
@@ -232,8 +226,15 @@ int main(void)
         }
     }
 
+    //create Timer task
+    retc = pthread_create(&thread_Timer, &attrs, timerTask, NULL);
+    if (retc != 0) {
+        printf("Failed to create Timer task\n");
+        while (1) {
+        }
+    }
 
-    //timerTask
+
     //adcTask
     //processingTask
     //LEDTask
