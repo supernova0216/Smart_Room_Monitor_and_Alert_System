@@ -1,14 +1,14 @@
 # include "threshold.h"
 
 
-void initThresholds(Thresholds* t, int tl, int th, int ll, int lh) {
+void initThresholds(THRESHOLDS* t, float tl, float th, float ll, float lh) {
     t->temp_low     = tl;
     t->temp_high    = th;
     t->light_low    = ll;
     t->light_high   = lh;
 }
 
-int updateThreshold(Thresholds* t, THRESH_TYPE type, int val) {
+uint8_t updateThreshold(THRESHOLDS* t, THRESH_TYPE type, float val) {
     switch (type) {
         case THRESHOLD_TEMP_LOW:
             t->temp_low = val;

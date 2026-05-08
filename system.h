@@ -2,6 +2,7 @@
 #define SYSTEM_H
 
 #include <stdbool.h>
+#include "threshold.h"
 
 typedef enum {
     NORMAL,
@@ -20,5 +21,7 @@ typedef struct {
 } SystemState;
 
 extern SystemState systemValue;
+
+SystemStatus processSensors(float temp, float light);
 
 #endif
