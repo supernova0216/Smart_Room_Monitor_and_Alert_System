@@ -22,6 +22,6 @@ typedef struct {
 
 extern SystemState systemValue;
 
-SystemStatus processSensors(float temp, float light);
+SystemStatus processSensors(THRESHOLDS* thresh, float temp, float light);
 
 #endif

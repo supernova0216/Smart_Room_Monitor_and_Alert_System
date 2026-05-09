@@ -7,22 +7,22 @@ SystemState systemValue = {
     .sampleNow = false
 };
 
-SystemStatus processTemp(float temp) {
-    if (temp > THRESH->temp_high) return TEMP_HIGH;
-    if (temp < THRESH->temp_low) return TEMP_LOW;
+SystemStatus processTemp(THRESHOLDS* thresh, float temp) {
+    if (temp > thresh->temp_high) return TEMP_HIGH;
+    if (temp < thresh->temp_low) return TEMP_LOW;
     return NORMAL
 }
 
-SystemStatus processLight(float light) {
-    if (light > THRESH->light_high) return LIGHT_HIGH;
-    if (light < THRESH->light_low) return LIGHT_LOW;
+SystemStatus processLight(THRESHOLDS* thresh, float light) {
+    if (light > thresh->light_high) return LIGHT_HIGH;
+    if (light < thresh->light_low) return LIGHT_LOW;
     return NORMAL
 }
 
-SystemStatus processSensors(float temp, float light) {
+SystemStatus processSensors(THRESHOLDS* thresh, float temp, float light) {
 
-    SystemStatus temp_status = processTemp(temp);
-    SystemStatus light_status = processLight(light);
+    SystemStatus temp_status = processTemp(thresh, temp);
+    SystemStatus light_status = processLight(thresh, light);
 
     if (temp_status != NORMAL && light_status != NORMAL) return MULTIPLE_ALERT;
     if (temp_status != NORMAL) return temp_status;

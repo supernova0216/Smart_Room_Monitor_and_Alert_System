@@ -71,10 +71,31 @@ void timer_clearFlag(void);
 */
 
 
-/*set up Processing, Threshold Logic & Alert Detection
-SystemStatus processSensors(float temp, float light);
-void *processingTask(void *arg);
-*/
+/* Processing test function */
+void testProcessing() {
+
+    float test_temp = 0;
+    float test_light = 500;
+    for (int i = 0; i < 20; i++) {
+        test_temp += (float) (i * 5);
+        printf("Temp Status: %.2f.\n", processSensors(THRESH, test_temp, test_light));
+    }
+
+    test_temp = 50;
+    test_light = 0;
+    for (int i = 0; i < 30; i++) {
+        test_light += (float) (i * 1000);
+        printf("Light Status: %.2f.\n", processSensors(THRESH, test_temp, test_list));
+    }
+    
+    test_temp = 0;
+    test_light = 0;
+    for (int i = 0; i < 30; i++) {
+        test_temp += (float) (i * 5);
+        test_light += float (i * 1000);
+        printf("Overall Status: %.2f\n", processSensors(THRESH, test_temp, thest_light));
+    }
+}
 
 
 /*set up LED Control + Button Handling
@@ -122,6 +143,9 @@ void UART_print(char *msg, ...) {
 /* Set up the hardware ready to run this demo */
 static void prvSetupHardware(void) {
     SYSCFG_DL_init();
+
+    // Init temp thresh with Celsius. Change to F variants if Farenheit is desired.
+    initThresholds(THRESH, TEMP_LOW_C, TEMP_HIGH_C, LIGHT_LOW, LIGHT_HIGH);
 };
 
 //task function: ADC & Sensor Reading Module
@@ -131,7 +155,27 @@ static void prvSetupHardware(void) {
 
 
 //task function: Processing, Threshold Logic & Alert Detection
+struct processing_config_t {
+    SystemState* state,
+    THRESHOLDS* thresh,
+}
+void* process_temp_light(void* args) {
 
+    struct processing_config_t* config = (struct processing_config_t*) args;
+    SystemState* n_state = config->state;
+    float prev_temp = n_state->temperature;
+    float 
+
+    while(1) {
+        // Wait for state temp and/or light to change
+        // sem_wait(&state_semaphore) // Change "state_semaphore" to name of actual state semaphore being used.
+
+        // Get new state then post change to state semaphore
+        n_state->status = processSensors(config->thresh, n_state->temperature, n_state->light);
+        // sem_post(&state_semaphore)
+        // usleep(100000) // Delay 0.1s to allow state change to be read by other tasks.
+    }
+}
 
 //task function: LED Control + Button Handling
 
@@ -196,51 +240,66 @@ void *UARTTask (void *arg0) {
 
 int main(void)
 {
-    pthread_t thread_UART;
-    pthread_attr_t attrs;
-    struct sched_param priParam;
-    int retc;
 
-    /* Initialize the system locks */
-#ifdef __ICCARM__
-    __iar_Initlocks();
-#endif
+    testProcessing();
 
-    /* Prepare the hardware to run this demo. */
-    prvSetupHardware();
+//     pthread_t thread_UART;
+//     pthread_t thread_processing;
+//     pthread_attr_t attrs;
+//     struct sched_param priParam;
+//     int retc;
 
-    /* Initialize the attributes structure with default values */
-    pthread_attr_init(&attrs);
+//     /* Initialize the system locks */
+// #ifdef __ICCARM__
+//     __iar_Initlocks();
+// #endif
 
-    /* Set priority, detach state, and stack size attributes */
-    priParam.sched_priority = 1;
-    retc                    = pthread_attr_setschedparam(&attrs, &priParam);
-    retc |= pthread_attr_setdetachstate(&attrs, PTHREAD_CREATE_DETACHED);
-    retc |= pthread_attr_setstacksize(&attrs, THREADSTACKSIZE);
-    if (retc != 0) {
-        /* failed to set attributes */
-        printf("Failed to set thread attributes\n");
-        while (1) {
-        }
-    }
-    //create UART task 
-    retc = pthread_create(&thread_UART, &attrs, UARTTask, NULL);
-    if (retc != 0) {
-        /* pthread_create() failed */
-        printf("Falied to create UART task\n");
-        while (1) {
-        }
-    }
+//     /* Prepare the hardware to run this demo. */
+//     prvSetupHardware();
 
+//     /* Initialize the attributes structure with default values */
+//     pthread_attr_init(&attrs);
 
-    //timerTask
-    //adcTask
-    //processingTask
-    //LEDTask
+//     /* Set priority, detach state, and stack size attributes */
+//     priParam.sched_priority = 1;
+//     retc                    = pthread_attr_setschedparam(&attrs, &priParam);
+//     retc |= pthread_attr_setdetachstate(&attrs, PTHREAD_CREATE_DETACHED);
+//     retc |= pthread_attr_setstacksize(&attrs, THREADSTACKSIZE);
+//     if (retc != 0) {
+//         /* failed to set attributes */
+//         printf("Failed to set thread attributes\n");
+//         while (1) {
+//         }
+//     }
+//     //create UART task 
+//     retc = pthread_create(&thread_UART, &attrs, UARTTask, NULL);
+//     if (retc != 0) {
+//         /* pthread_create() failed */
+//         printf("Falied to create UART task\n");
+//         while (1) {
+//         }
+//     }
 
 
-    /* Start the FreeRTOS scheduler */
-    vTaskStartScheduler();
+//     //timerTask
+//     //adcTask
+//     //processingTask
+//     struct processing_config_t processing_config = {
+//         .state = &systemValue,
+//         .thresh = THRESH
+//     };
+//     retc = pthread_create(&thread_processing, &attrs, process_temp_light, &processing_config);
+//     if (retc != 0) {
+//         printf("Failed to create processing task\n");
+//         while (1) {
+            
+//         }
+//     }
+//     //LEDTask
+
+
+//     /* Start the FreeRTOS scheduler */
+//     vTaskStartScheduler();
 
     return (0);
 }
