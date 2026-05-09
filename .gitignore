@@ -11,8 +11,6 @@ Release/
 *.d
 
 # SysConfig generated files 
-ti_msp_dl_config.c
-ti_msp_dl_config.h
 device_linker.cmd
 device.cmd.genlibs
 
