@@ -65,10 +65,50 @@ void *adcTask(void *arg);
 */
 
 
-/*set up Processing, Threshold Logic & Alert Detection
-SystemStatus processSensors(float temp, float light);
-void *processingTask(void *arg);
+/*set up Timer & Periodic Sampling
+extern volatile bool sampleNow;
+void *timerTask(void *arg);
+void timer_clearFlag(void);
 */
+
+
+/* Processing test function */
+void testProcessing() {
+
+    float test_temp = 0;
+    float test_light = 500;
+    for (int i = 0; i < 20; i++) {
+        test_temp += (float) (i * 5);
+        int status = processSensors(&THRESH, test_temp, test_light);
+        printf("Temp Status: ");
+        printStatus(status);
+        printf("\n");
+        delay_cycles(32000000 / 2);
+    }
+
+    test_temp = 25;
+    test_light = 0;
+    for (int i = 0; i < 30; i++) {
+        test_light += (float) (i * 1000);
+        int status = processSensors(&THRESH, test_temp, test_light);
+        printf("Light Status: ");
+        printStatus(status);
+        printf("\n");
+        delay_cycles(32000000 / 2);
+    }
+    
+    test_temp = 0;
+    test_light = 0;
+    for (int i = 0; i < 30; i++) {
+        test_temp += (float) (i * 5);
+        test_light += (float) (i * 1000);
+        int status = processSensors(&THRESH, test_temp, test_light);
+        printf("Overall Status: ");
+        printStatus(status);
+        printf("\n");
+        delay_cycles(32000000 / 2);
+    }
+}
 
 
 /*set up LED Control + Button Handling
@@ -116,13 +156,41 @@ void UART_print(char *msg, ...) {
 /* Set up the hardware ready to run this demo */
 static void prvSetupHardware(void) {
     SYSCFG_DL_init();
+
+    // Init temp thresh with Celsius. Change to F variants if Farenheit is desired.
+    initThresholds(&THRESH, TEMP_LOW_C, TEMP_HIGH_C, LIGHT_LOW_L, LIGHT_HIGH_L);
 };
 
 //task function: ADC & Sensor Reading Module
 
 
 //task function: Processing, Threshold Logic & Alert Detection
+struct processing_config_t {
+    SystemState* state;
+    THRESHOLDS* thresh;
+};
 
+void* process_temp_light(void* args) {
+
+    struct processing_config_t* config = (struct processing_config_t*) args;
+    SystemState* n_state = config->state;
+    SystemStatus p_status;
+
+    while(1) {
+        // Wait for state temp and/or light to change
+        // sem_wait(&state_semaphore) // Change "state_semaphore" to name of actual state semaphore being used.
+
+        // Get new state then post change to state semaphore if status has changed
+        p_status = n_state->status;
+        n_state->status = processSensors(config->thresh, n_state->temperature, n_state->light);
+        // if (p_status != n_state->status) sem_post(&state_semaphore);
+
+        // Debug
+        // printf("Old status: %d | New status: %d\n", p_status, n_state->status);
+
+        usleep(100000); // Delay 0.1s to allow state change to be read by other tasks.
+    }
+}
 
 //task function: LED Control + Button Handling
 
@@ -190,6 +258,12 @@ void *UARTTask (void *arg0) {
 
 int main(void)
 {
+    // // Threshold Testing
+    // prvSetupHardware();
+    // testProcessing();
+    // while(1);
+
+    pthread_t thread_processing;
     pthread_t thread_UART, thread_Timer;
     pthread_attr_t attrs;
     struct sched_param priParam;
@@ -237,6 +311,17 @@ int main(void)
 
     //adcTask
     //processingTask
+    struct processing_config_t processing_config = {
+        .state = &systemValue,
+        .thresh = &THRESH
+    };
+    retc = pthread_create(&thread_processing, &attrs, process_temp_light, &processing_config);
+    if (retc != 0) {
+        printf("Failed to create processing task\n");
+        while (1) {
+            
+        }
+    }
     //LEDTask
 
 
