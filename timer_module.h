@@ -7,13 +7,17 @@
 #include "ti_msp_dl_config.h"
 #include "ti/driverlib/driverlib.h"
 
+#include <FreeRTOS.h>
+#include <task.h>
+#include <system.h>
+
 //  Sampling interval — change here to adjust rate
 //  Default: 500 ms
 #define SAMPLE_INTERVAL_MS  500
 
 //  Shared flag — set by timer task, cleared by
 //  whoever processes the sample
-extern volatile bool sampleNow;
+//extern volatile bool sampleNow;
 
 //  Thread stack size (matches rest of project)
 #define THREADSTACKSIZE 1024
@@ -39,9 +43,9 @@ void *timerTask(void *arg0);
  * call this immediately after starting the ADC read so the flag
  * doesn't get acted on twice.
  */
-static inline void timer_clearFlag(void)
+/*static inline void timer_clearFlag(void)
 {
     sampleNow = false;
-}
+}*/
 
 #endif /* TIMER_MODULE_H */
