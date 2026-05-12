@@ -46,7 +46,9 @@
 #include <unistd.h>
 #include <semaphore.h>      //POSIX
 #include <stdlib.h>
-#include <system.h>         //shared set up SystemState
+#include "system.h"         //shared set up SystemState
+#include "adc_sensor.h"
+#include "timer_module.h"
 #include <stdarg.h>         //UART_print
 #include <timer_module.h>   
 
@@ -196,62 +198,72 @@ void* process_temp_light(void* args) {
 
 
 //task function: UART Communication
-void *UARTTask (void *arg0) {
-    //initalize UART hardware
+void *UARTTask(void *arg0) {
+    /* initialize UART hardware */
     DL_UART_Main_reset(UART0);
     DL_UART_Main_enablePower(UART0);
     delay_cycles(POWER_STARTUP_DELAY);
-    DL_UART_Main_setClockConfig(UART0, (DL_UART_Main_ClockConfig *) &gUART_0ClockConfig);      //choose clock signal to be used on the controller
-    DL_UART_Main_init(UART0, (DL_UART_Main_Config *) &gUART_0Config);       //sets communication parameters
-    
-    //determine baud rate to be used
-    DL_UART_Main_setOversampling(UART0, DL_UART_OVERSAMPLING_RATE_16X);     
-    DL_UART_Main_setBaudRateDivisor(UART0, 17, 23);
-    
-    DL_UART_Main_enable(UART0);     //enable UART
+    DL_UART_Main_setClockConfig(UART0, (DL_UART_Main_ClockConfig *) &gUART_0ClockConfig);
+    DL_UART_Main_init(UART0, (DL_UART_Main_Config *) &gUART_0Config);
 
-    //pins configuration
+    /* determine baud rate */
+    DL_UART_Main_setOversampling(UART0, DL_UART_OVERSAMPLING_RATE_16X);
+    DL_UART_Main_setBaudRateDivisor(UART0, 17, 23);
+
+    DL_UART_Main_enable(UART0);
+
+    /* pins configuration */
     DL_GPIO_initPeripheralOutputFunction(IOMUX_PINCM21, IOMUX_PINCM21_PF_UART0_TX);
     DL_GPIO_initPeripheralInputFunction(IOMUX_PINCM22, IOMUX_PINCM22_PF_UART0_RX);
 
-    //string
     UART_sendString("System Started\r\n");
 
+    ADC_Sensor_init();
+    UART_sendString("ADC Sensor Module Initialized\r\n");
+
     while (1) {
-        //for testing purposes - delete once all tasks combined
-        /*systemValue.temperature += 0.5;
-        systemValue.light += 1.0;
-        systemValue.status = NORMAL;
-        systemValue.sampleNow = true; //timer trigger
-        */
+        if (sampleNow) {
+            uint16_t tempRaw;
+            uint16_t lightRaw;
+            int temp_int, temp_decimal;
+            int light_int, light_decimal;
 
+            timer_clearFlag();
 
-        //only print when new sample is ready
-        if(systemValue.sampleNow) {
-            systemValue.sampleNow = false;
-            UART_print("Timer tick\r\n");       //testing timer - remove once finished
+            tempRaw = readTemperatureRaw();
+            lightRaw = readLightRaw();
 
-            //read sensor
-            //systemValue.temperature = readTemperature();
-            //systemValue.light = readLightPercent();
+            systemValue.temperature = convertTemperatureRawToC(tempRaw);
+            systemValue.light = convertLightRawToPercent(lightRaw);
 
-            //process logic
-            //systemValue.status = processSensors(systemValue.temperature, systemValue.light);
+            /* Temporary status for module testing only */
+            systemValue.status = NORMAL;
 
-            //update LEDs
-            //updateLEDs(systemValue.status);
+            temp_int = (int) systemValue.temperature;
+            temp_decimal = (int) ((systemValue.temperature - temp_int) * 100.0f);
+            if (temp_decimal < 0) {
+                temp_decimal = -temp_decimal;
+            }
 
-            //alternative to print float since UART can only send int
-            int temp_int =  (int) systemValue.temperature;
-            int temp_decimal = (int) ((systemValue.temperature - temp_int) * 100);
-            
-            //UART_print("Test int: %d\r\n", 123);      //test to check UART_print
-            UART_print("Temperature: %d.%02d C | Light: %d %%| Status: %d\r\n",
-                        temp_int, temp_decimal, (int) (systemValue.light), systemValue.status);
+            light_int = (int) systemValue.light;
+            light_decimal = (int) ((systemValue.light - light_int) * 100.0f);
+            if (light_decimal < 0) {
+                light_decimal = -light_decimal;
+            }
+
+            UART_print(
+                "TempRaw: %u | Temp: %d.%02d C | LightRaw: %u | Light: %d.%02d %% | Status: %d\r\n",
+                tempRaw,
+                temp_int, temp_decimal,
+                lightRaw,
+                light_int, light_decimal,
+                systemValue.status
+            );
         }
-        
-        vTaskDelay(pdMS_TO_TICKS(900));     //prevent CPU hogging, printing speed
+
+        vTaskDelay(pdMS_TO_TICKS(50));
     }
+
     return NULL;
 }
 
@@ -295,7 +307,15 @@ int main(void)
     retc = pthread_create(&thread_UART, &attrs, UARTTask, NULL);
     if (retc != 0) {
         /* pthread_create() failed */
-        printf("Falied to create UART task\n");
+        printf("Failed to create UART task\n");
+        while (1) {
+        }
+    }
+
+    // create Timer task
+    retc = pthread_create(&thread_Timer, &attrs, timerTask, NULL);
+    if (retc != 0) {
+        printf("Failed to create Timer task\n");
         while (1) {
         }
     }
