@@ -1,5 +1,6 @@
 # include "threshold.h"
 
+THRESHOLDS THRESH;
 
 void initThresholds(THRESHOLDS* t, float tl, float th, float ll, float lh) {
     t->temp_low     = tl;

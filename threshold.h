@@ -1,6 +1,6 @@
 #pragma once
 
-#include <stduint32_t.h>
+#include <stdio.h>
 #include "ti_msp_dl_config.h"
 #include "ti/driverlib/driverlib.h"
 
@@ -9,8 +9,8 @@
 #define TEMP_LOW_C      16.0
 #define TEMP_HIGH_F     85.0
 #define TEMP_HIGH_C     29.0
-#define LIGHT_LOW       250.0
-#define LIGHT_HIGH      25000.0
+#define LIGHT_LOW_L     250.0
+#define LIGHT_HIGH_L    25000.0
 
 /* Threshold type enumerations */
 typedef enum {
@@ -18,7 +18,7 @@ typedef enum {
     THRESHOLD_TEMP_HIGH     = 1,
     THRESHOLD_LIGHT_LOW     = 2,
     THRESHOLD_LIGHT_HIGH    = 3,
-} THRESH_TYPE
+} THRESH_TYPE;
 
 /* Structure for defining system thresholds */
 typedef struct thresholds_t{
@@ -28,9 +28,7 @@ typedef struct thresholds_t{
     float light_high;
 } THRESHOLDS;
 
-/// Thresholds structure to be used by system
-extern THRESHOLDS* THRESH;
-
+extern THRESHOLDS THRESH;
 
 /* =============================================================================;
     initThresholds() - Initialize temperature/light threshold values.

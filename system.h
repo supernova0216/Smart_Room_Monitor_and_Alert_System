@@ -24,4 +24,6 @@ extern SystemState systemValue;
 
 SystemStatus processSensors(THRESHOLDS* thresh, float temp, float light);
 
+void printStatus(SystemStatus status);
+
 #endif
