@@ -61,6 +61,7 @@ extern void *Thread(void *arg0);
 
 /* Stack size in bytes */
 #define THREADSTACKSIZE 1024
+#define configTOTAL_HEAP_SIZE (12 * 1024)
 
 struct processing_config_t {
     SystemState* state;
@@ -149,8 +150,12 @@ void UART_print(char *msg, ...) {
 
 /* Set up the hardware ready to run this demo */
 static void prvSetupHardware(void) {
-    SYSCFG_DL_init();
 
+    SYSCFG_DL_init();
+    
+    ADC_Sensor_init();
+    // UART_sendString("ADC Sensor Module Initialized\r\n");
+    
     // Init temp thresh with Celsius. Change to F variants if Farenheit is desired.
     initThresholds(&THRESH, TEMP_LOW_C, TEMP_HIGH_C, LIGHT_LOW_L, LIGHT_HIGH_L);
 };
@@ -179,6 +184,8 @@ void *process_temp_light(void* args) {
 
         usleep(100000); // Delay 0.1s to allow state change to be read by other tasks.
     }
+
+    return NULL;
 }
 
 //task function: UART Communication
@@ -202,23 +209,20 @@ void *UARTTask(void *arg0) {
 
     UART_sendString("System Started\r\n");
 
-    ADC_Sensor_init();
-    UART_sendString("ADC Sensor Module Initialized\r\n");
-
     while (1) {
         if (sampleNow) {
-            uint16_t tempRaw;
-            uint16_t lightRaw;
+            float tempC;
+            // uint16_t lightRaw;
             int temp_int, temp_decimal;
-            int light_int, light_decimal;
+            // int light_int, light_decimal;
 
             timer_clearFlag();
 
-            tempRaw = readTemperatureRaw();
-            lightRaw = readLightRaw();
+            tempC = readTemperatureC();
+            // lightRaw = readLightRaw();
 
-            systemValue.temperature = convertTemperatureRawToC(tempRaw);
-            systemValue.light = convertLightRawToPercent(lightRaw);
+            systemValue.temperature = tempC;
+            // systemValue.light = convertLightRawToPercent(lightRaw);
 
             /* Temporary status for module testing only */
             systemValue.status = NORMAL;
@@ -229,20 +233,35 @@ void *UARTTask(void *arg0) {
                 temp_decimal = -temp_decimal;
             }
 
-            light_int = (int) systemValue.light;
-            light_decimal = (int) ((systemValue.light - light_int) * 100.0f);
-            if (light_decimal < 0) {
-                light_decimal = -light_decimal;
-            }
+            // light_int = (int) systemValue.light;
+            // light_decimal = (int) ((systemValue.light - light_int) * 100.0f);
+            // if (light_decimal < 0) {
+            //     light_decimal = -light_decimal;
+            // }
 
             UART_print(
-                "TempRaw: %u | Temp: %d.%02d C | LightRaw: %u | Light: %d.%02d %% | Status: %d\r\n",
-                tempRaw,
+                "Temp: %d.%02d C | Status: %d\r\n",
                 temp_int, temp_decimal,
-                lightRaw,
-                light_int, light_decimal,
                 systemValue.status
             );
+
+            /* Uncomment once light sensor reading is functional */
+
+            // UART_print(
+            //     "Temp: %d.%02d C | Light: %d.%02d %% | Status: %d\r\n",
+            //     temp_int, temp_decimal,
+            //     light_int, light_decimal,
+            //     systemValue.status
+            // );
+
+            /* Uncomment to display prints in console */
+
+            // printf(
+            //     "Temp: %d.%02d C | Status: %d\r\n",
+            //     temp_int,
+            //     temp_decimal,
+            //     systemValue.status
+            // );
         }
 
         vTaskDelay(pdMS_TO_TICKS(50));
@@ -254,7 +273,12 @@ void *UARTTask(void *arg0) {
 
 int main(void)
 {
+<<<<<<< HEAD
     pthread_t thread_UART, thread_Timer;
+=======
+
+    pthread_t thread_UART, thread_Timer, thread_Processing;
+>>>>>>> 5bc38fc (ADC Temp Sensor and Reading Working)
     pthread_attr_t attrs;
     struct sched_param priParam;
     int retc;
@@ -282,6 +306,7 @@ int main(void)
         }
     }
     //create UART task 
+    pthread_attr_setstacksize(&attrs, 1024);
     retc = pthread_create(&thread_UART, &attrs, UARTTask, NULL);
     if (retc != 0) {
         /* pthread_create() failed */
@@ -291,6 +316,10 @@ int main(void)
     }
 
     // create Timer task
+<<<<<<< HEAD
+=======
+    pthread_attr_setstacksize(&attrs, 512);
+>>>>>>> 5bc38fc (ADC Temp Sensor and Reading Working)
     retc = pthread_create(&thread_Timer, &attrs, timerTask, NULL);
     if (retc != 0) {
         printf("Failed to create Timer task\n");
@@ -301,14 +330,19 @@ int main(void)
 
     //timerTask
     //adcTask
-    //processingTask
-    struct processing_config_t processing_config = {
+
+
+    
+    // processingTask
+    pthread_attr_setstacksize(&attrs, 512);
+    static struct processing_config_t processing_config = {
         .state = &systemValue,
         .thresh = &THRESH
     };
-    retc = pthread_create(&thread_processing, &attrs, process_temp_light, &processing_config);
+    
+    retc = pthread_create(&thread_Processing, &attrs, process_temp_light, &processing_config);
     if (retc != 0) {
-        printf("Failed to create processing task\n");
+        printf("Failed to create processing task. retc = %d\n", retc);
         while (1) {
         }
     }

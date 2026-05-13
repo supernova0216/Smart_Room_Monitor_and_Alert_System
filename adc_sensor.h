@@ -7,38 +7,30 @@
 
 /* ---------- User-adjustable defaults ---------- */
 
-/* Basic software averaging */
-#define ADC_SENSOR_AVG_SAMPLES      8U
+#define ADC_SENSOR_MAX_COUNTS       4096.0f   /* 12-bit ADC */
 
-/* Assume VDDA reference = 3.3V */
-#define ADC_SENSOR_VREF_VOLTS       3.3f
-#define ADC_SENSOR_MAX_COUNTS       4095.0f   /* 12-bit ADC */
+#define VREF_1V4                    (1.4f / ADC_SENSOR_MAX_COUNTS)
+#define VREF_3V3                    (3.3f / ADC_SENSOR_MAX_COUNTS)
+#define TYP_TSC                     (-1.8 / 1000)
+#define TYP_TSTRIM                  30.0
+
+#define TEMP_SAMPLE_TIME            (CPUCLK_FREQ * 0.00002)
+#define ADC_TIMEOUT                 10000U
 
 /*
  * Default sensor channel assumptions:
- * - Temp sensor: ADC0.5-ish
+ * - Temp sensor: ADC0.11
  * - Light sensor: ADC0.7-ish
  *
  * If board/jumpers show different channels, only change these 2 lines.
  */
-#define ADC_TEMP_CHANNEL            DL_ADC12_INPUT_CHAN_5
+#define ADC_TEMP_CHANNEL            DL_ADC12_INPUT_CHAN_11
 #define ADC_LIGHT_CHANNEL           DL_ADC12_INPUT_CHAN_7
 
-/* Thermistor model assumptions for simple Celsius conversion */
-#define THERM_FIXED_RESISTOR_OHMS   10000.0f
-#define THERM_NOMINAL_RES_OHMS      10000.0f
-#define THERM_BETA                  3950.0f
-#define THERM_T0_KELVIN             298.15f   /* 25 C */
 
 /* ---------- Public API ---------- */
 
 void ADC_Sensor_init(void);
-
-uint16_t readTemperatureRaw(void);
-uint16_t readLightRaw(void);
-
-float convertTemperatureRawToC(uint16_t raw);
-float convertLightRawToPercent(uint16_t raw);
 
 float readTemperatureC(void);
 float readLightPercent(void);
