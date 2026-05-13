@@ -15,40 +15,43 @@ static void setRGB(int r, int g, int b)
     // If colors are inverted, swap setPins and clearPins here.
 
     if (r)
-        DL_GPIO_setPins(GPIO_LEDS_RED_PORT, GPIO_LEDS_RED_PIN);
+        DL_GPIO_setPins(GPIOB, DL_GPIO_PIN_26);
     else
-        DL_GPIO_clearPins(GPIO_LEDS_RED_PORT, GPIO_LEDS_RED_PIN);
+        DL_GPIO_clearPins(GPIOB, DL_GPIO_PIN_26);
 
     if (g)
-        DL_GPIO_setPins(GPIO_LEDS_GREEN_PORT, GPIO_LEDS_GREEN_PIN);
+        DL_GPIO_setPins(GPIOB, DL_GPIO_PIN_27);
     else
-        DL_GPIO_clearPins(GPIO_LEDS_GREEN_PORT, GPIO_LEDS_GREEN_PIN);
+        DL_GPIO_clearPins(GPIOB, DL_GPIO_PIN_27);
 
     if (b)
-        DL_GPIO_setPins(GPIO_LEDS_BLUE_PORT, GPIO_LEDS_BLUE_PIN);
+        DL_GPIO_setPins(GPIOB, DL_GPIO_PIN_22);
     else
-        DL_GPIO_clearPins(GPIO_LEDS_BLUE_PORT, GPIO_LEDS_BLUE_PIN);
+        DL_GPIO_clearPins(GPIOB, DL_GPIO_PIN_22);
 }
 
 void LED_Button_Init(void)
 {
-    DL_GPIO_initDigitalOutput(GPIO_LEDS_RED_IOMUX);
-    DL_GPIO_initDigitalOutput(GPIO_LEDS_GREEN_IOMUX);
-    DL_GPIO_initDigitalOutput(GPIO_LEDS_BLUE_IOMUX);
+    DL_GPIO_enablePower(GPIOA);
+    DL_GPIO_enablePower(GPIOB);    
+    
+    DL_GPIO_initDigitalOutput(IOMUX_PINCM57); // PB26 - red LED2 
+    DL_GPIO_initDigitalOutput(IOMUX_PINCM58); // PB27 - green LED2 
+    DL_GPIO_initDigitalOutput(IOMUX_PINCM50); // PB22 - blue LED2 
 
-    DL_GPIO_enableOutput(GPIO_LEDS_RED_PORT, GPIO_LEDS_RED_PIN);
-    DL_GPIO_enableOutput(GPIO_LEDS_GREEN_PORT, GPIO_LEDS_GREEN_PIN);
-    DL_GPIO_enableOutput(GPIO_LEDS_BLUE_PORT, GPIO_LEDS_BLUE_PIN);
+    DL_GPIO_enableOutput(GPIOB, DL_GPIO_PIN_26); 
+    DL_GPIO_enableOutput(GPIOB, DL_GPIO_PIN_27); 
+    DL_GPIO_enableOutput(GPIOB, DL_GPIO_PIN_22); 
 
-    // Keep S2 like your original code: pull-down, pressed = 1
-    DL_GPIO_initDigitalInputFeatures(GPIO_BUTTONS_S2_IOMUX,
+    // Keep S1 like your original code: pull-down, pressed = 1, PA18
+    DL_GPIO_initDigitalInputFeatures(IOMUX_PINCM40,
         DL_GPIO_INVERSION_DISABLE,
         DL_GPIO_RESISTOR_PULL_DOWN,
         DL_GPIO_HYSTERESIS_DISABLE,
         DL_GPIO_WAKEUP_DISABLE);
 
-    // Keep S3 pull-up: pressed = 0
-    DL_GPIO_initDigitalInputFeatures(GPIO_BUTTONS_S3_IOMUX,
+    // Keep S2 pull-up: pressed = 0, PB21
+    DL_GPIO_initDigitalInputFeatures(IOMUX_PINCM49,
         DL_GPIO_INVERSION_DISABLE,
         DL_GPIO_RESISTOR_PULL_UP,
         DL_GPIO_HYSTERESIS_DISABLE,
@@ -59,6 +62,14 @@ void LED_Button_Init(void)
 
 void updateLEDs(SystemStatus status, OperatingMode mode)
 {
+    //uncommented after done integrating adc for alert overide
+    /*if (status == TEMP_HIGH || status == TEMP_LOW || status == LIGHT_LOW
+        || status == LIGHT_HIGH || status == MULTIPLE_ALERT) 
+    {
+        setRGB(1, 0, 0);    //set red for any alert
+        return;
+    }*/
+    //normal mode display
     switch (mode)
     {
         case MODE_MONITOR:
@@ -92,19 +103,19 @@ void handleButtons(void)
 {
     TickType_t now = xTaskGetTickCount();
 
-    // S2 uses pull-down:
+    // S1 uses pull-down:
     // unpressed = 0
     // pressed   = 1
     bool btn1Pressed =
-        (DL_GPIO_readPins(GPIO_BUTTONS_S2_PORT, GPIO_BUTTONS_S2_PIN) != 0);
+        (DL_GPIO_readPins(GPIOA, DL_GPIO_PIN_18) != 0);
 
-    // S3 uses pull-up:
+    // S2 uses pull-up:
     // unpressed = 1
     // pressed   = 0
     bool btn2Pressed =
-        (DL_GPIO_readPins(GPIO_BUTTONS_S3_PORT, GPIO_BUTTONS_S3_PIN) == 0);
+        (DL_GPIO_readPins(GPIOB, DL_GPIO_PIN_21) == 0);
 
-    // S2: change mode only once when button is first pressed
+    // S1: change mode only once when button is first pressed
     if (btn1Pressed && !btn1LastPressed)
     {
         if ((now - btn1LastTime) >= pdMS_TO_TICKS(DEBOUNCE_MS))
@@ -114,7 +125,7 @@ void handleButtons(void)
         }
     }
 
-    // S3: reset back to monitor mode
+    // S2: reset back to monitor mode
     if (btn2Pressed && !btn2LastPressed)
     {
         if ((now - btn2LastTime) >= pdMS_TO_TICKS(DEBOUNCE_MS))
