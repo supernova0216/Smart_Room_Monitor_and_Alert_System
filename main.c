@@ -46,12 +46,11 @@
 #include <unistd.h>
 #include <semaphore.h>      //POSIX
 #include <stdlib.h>
-#include "system.h"         //shared set up SystemState
-#include "adc_sensor.h"
-#include "timer_module.h"
+#include <system.h>         //shared set up SystemState
 #include <stdarg.h>         //UART_print
 #include "timer_module.h"  
 #include "led_button.h"
+#include "adc_sensor.h"
 
 
 /* TI includes for driver configuration */
@@ -61,7 +60,7 @@ extern void *Thread(void *arg0);
 
 /* Stack size in bytes */
 #define THREADSTACKSIZE 1024
-#define configTOTAL_HEAP_SIZE (12 * 1024)
+//#define configTOTAL_HEAP_SIZE (12 * 1024)
 
 struct processing_config_t {
     SystemState* state;
@@ -150,12 +149,9 @@ void UART_print(char *msg, ...) {
 
 /* Set up the hardware ready to run this demo */
 static void prvSetupHardware(void) {
-
     SYSCFG_DL_init();
-    
+
     ADC_Sensor_init();
-    // UART_sendString("ADC Sensor Module Initialized\r\n");
-    
     // Init temp thresh with Celsius. Change to F variants if Farenheit is desired.
     initThresholds(&THRESH, TEMP_LOW_C, TEMP_HIGH_C, LIGHT_LOW_L, LIGHT_HIGH_L);
 };
@@ -184,101 +180,158 @@ void *process_temp_light(void* args) {
 
         usleep(100000); // Delay 0.1s to allow state change to be read by other tasks.
     }
-
-    return NULL;
 }
 
 //task function: UART Communication
-void *UARTTask(void *arg0) {
-    /* initialize UART hardware */
+void *UARTTask (void *arg0) {
+    //initalize UART hardware
     DL_UART_Main_reset(UART0);
     DL_UART_Main_enablePower(UART0);
     delay_cycles(POWER_STARTUP_DELAY);
-    DL_UART_Main_setClockConfig(UART0, (DL_UART_Main_ClockConfig *) &gUART_0ClockConfig);
-    DL_UART_Main_init(UART0, (DL_UART_Main_Config *) &gUART_0Config);
-
-    /* determine baud rate */
-    DL_UART_Main_setOversampling(UART0, DL_UART_OVERSAMPLING_RATE_16X);
+    DL_UART_Main_setClockConfig(UART0, (DL_UART_Main_ClockConfig *) &gUART_0ClockConfig);      //choose clock signal to be used on the controller
+    DL_UART_Main_init(UART0, (DL_UART_Main_Config *) &gUART_0Config);       //sets communication parameters
+    
+    //determine baud rate to be used
+    DL_UART_Main_setOversampling(UART0, DL_UART_OVERSAMPLING_RATE_16X);     
     DL_UART_Main_setBaudRateDivisor(UART0, 17, 23);
+    
+    DL_UART_Main_enable(UART0);     //enable UART
 
-    DL_UART_Main_enable(UART0);
-
-    /* pins configuration */
+    //pins configuration
     DL_GPIO_initPeripheralOutputFunction(IOMUX_PINCM21, IOMUX_PINCM21_PF_UART0_TX);
     DL_GPIO_initPeripheralInputFunction(IOMUX_PINCM22, IOMUX_PINCM22_PF_UART0_RX);
 
+    //string
     UART_sendString("System Started\r\n");
 
+    //LED
+    LED_Button_Init();
+
+    UART_sendString("Testing LEDs...\r\n");
+
+    updateLEDs(NORMAL, MODE_MONITOR);
+    UART_sendString("GREEN - Normal\r\n");
+    vTaskDelay(pdMS_TO_TICKS(2000));
+
+    updateLEDs(TEMP_HIGH, MODE_MONITOR);
+    UART_sendString("RED - Alert\r\n");
+    vTaskDelay(pdMS_TO_TICKS(2000));
+
+    updateLEDs(MULTIPLE_ALERT, MODE_MONITOR);
+    UART_sendString("YELLOW - Multiple Alert\r\n");
+    vTaskDelay(pdMS_TO_TICKS(2000));
+
+    updateLEDs(NORMAL, MODE_THRESHOLD_VIEW);
+    UART_sendString("BLUE - Config Mode\r\n");
+    vTaskDelay(pdMS_TO_TICKS(2000));
+
+    UART_sendString("LED test done! Now testing buttons...\r\n");
+
+    char rxBuf[16];
+    int rxIndex = 0;
+    bool started = false;
+
     while (1) {
-        if (sampleNow) {
-            float tempC;
-            // uint16_t lightRaw;
-            int temp_int, temp_decimal;
-            // int light_int, light_decimal;
+        //for testing purposes - delete once all tasks combined
+        //systemValue.temperature += 0.5;
+        //systemValue.light += 10.0;
+        //systemValue.status = NORMAL;
+        //systemValue.sampleNow = true; //timer trigger
 
-            timer_clearFlag();
+        
+        // Wait for START command
+        if (!started) {
+            if (!DL_UART_isRXFIFOEmpty(UART0)) {
+                char c = DL_UART_Main_receiveData(UART0);   //read the received character  
+                while (DL_UART_isTXFIFOFull(UART0));
+                DL_UART_Main_transmitData(UART0, c);    //echo; send the same character back 
+                
+                // end of command
+                if (c == '\r' || c == '\n') {
+                    rxBuf[rxIndex] = '\0';
+                    if (strcmp(rxBuf, "start") == 0) {
+                        UART_print("\r\nSYSTEM STARTED\r\n");
+                        started = true;
+                    } else {
+                        UART_print("\r\nType 'start' only\r\n");
+                    }
+                    rxIndex = 0;
+                }
+                else if (rxIndex < sizeof(rxBuf) - 1) {
+                    rxBuf[rxIndex++] = c;
+                }
+            }
+            vTaskDelay(pdMS_TO_TICKS(50));
+            continue;
+        }
 
-            tempC = readTemperatureC();
-            // lightRaw = readLightRaw();
+        //system runs
+        // Debug: read raw button states
+        bool s1 = DL_GPIO_readPins(GPIOA, DL_GPIO_PIN_18) != 0;
+        bool s2 = DL_GPIO_readPins(GPIOB, DL_GPIO_PIN_21) != 0;
+        UART_print("S1=%d S2=%d Mode=%d\r\n", s1, s2, getMode());
+        handleButtons();
 
+        //only print when new sample is ready
+        if(systemValue.sampleNow) {
+            systemValue.sampleNow = false;
+            UART_print("Timer tick\r\n");       //testing timer - remove once finished
+
+            //read sensor
+            /*uint16_t tempRaw = readTemperatureRaw();
+            uint16_t lightRaw = readLightRaw();
+            systemValue.temperature = convertTemperatureRawToC(tempRaw);            
+            systemValue.light = convertLightRawToPercent(lightRaw);*/
+            float tempC = readTemperatureC();
             systemValue.temperature = tempC;
-            // systemValue.light = convertLightRawToPercent(lightRaw);
 
-            /* Temporary status for module testing only */
-            systemValue.status = NORMAL;
+            
+            //for testing threshold 
+            //systemValue.temperature += 0.5;
+            //systemValue.light += 10.0;
 
-            temp_int = (int) systemValue.temperature;
-            temp_decimal = (int) ((systemValue.temperature - temp_int) * 100.0f);
+            //process logic
+            systemValue.status = processSensors(&THRESH,systemValue.temperature, systemValue.light);
+
+            //update LEDs
+            //updateLEDs(systemValue.status);
+            //systemValue.status = NORMAL;            //testing convert adc 
+            updateLEDs(systemValue.status, getMode());
+
+            //alternative to print float since UART can only send int
+            int temp_int =  (int) systemValue.temperature;
+            int temp_decimal = (int) ((systemValue.temperature - temp_int) * 100);
             if (temp_decimal < 0) {
                 temp_decimal = -temp_decimal;
             }
 
-            // light_int = (int) systemValue.light;
-            // light_decimal = (int) ((systemValue.light - light_int) * 100.0f);
-            // if (light_decimal < 0) {
-            //     light_decimal = -light_decimal;
-            // }
-
-            UART_print(
-                "Temp: %d.%02d C | Status: %d\r\n",
-                temp_int, temp_decimal,
-                systemValue.status
-            );
-
-            /* Uncomment once light sensor reading is functional */
-
-            // UART_print(
-            //     "Temp: %d.%02d C | Light: %d.%02d %% | Status: %d\r\n",
-            //     temp_int, temp_decimal,
-            //     light_int, light_decimal,
-            //     systemValue.status
-            // );
-
-            /* Uncomment to display prints in console */
-
-            // printf(
-            //     "Temp: %d.%02d C | Status: %d\r\n",
-            //     temp_int,
-            //     temp_decimal,
-            //     systemValue.status
-            // );
+            int light_int = (int) systemValue.light;
+            int light_decimal = (int) ((systemValue.light - light_int) * 100);
+            if (light_decimal < 0) {
+                light_decimal = -light_decimal;
+            }
+            
+            //UART_print("Test int: %d\r\n", 123);      //test to check UART_print
+            //UART_print("Temperature: %d.%02d C  (Raw:%u) | Light: %d.%02d %%  (Raw:%u) | Status: %d\r\n",
+            //            temp_int, temp_decimal, tempRaw, light_int, light_decimal, lightRaw, systemValue.status);
+            UART_print("Temperature: %d.%02d C  | Light: %d.%02d %%  | Status: %d\r\n",
+                        temp_int, temp_decimal, light_int, light_decimal, systemValue.status);
         }
-
-        vTaskDelay(pdMS_TO_TICKS(50));
+        
+        vTaskDelay(pdMS_TO_TICKS(900));     //prevent CPU hogging, printing speed
     }
-
     return NULL;
 }
 
 
 int main(void)
 {
-<<<<<<< HEAD
-    pthread_t thread_UART, thread_Timer;
-=======
+    // // Threshold Testing
+    // prvSetupHardware();
+    // testProcessing();
+    // while(1);
 
-    pthread_t thread_UART, thread_Timer, thread_Processing;
->>>>>>> 5bc38fc (ADC Temp Sensor and Reading Working)
+    pthread_t thread_UART, thread_Timer, thread_processing;
     pthread_attr_t attrs;
     struct sched_param priParam;
     int retc;
@@ -310,16 +363,13 @@ int main(void)
     retc = pthread_create(&thread_UART, &attrs, UARTTask, NULL);
     if (retc != 0) {
         /* pthread_create() failed */
-        printf("Failed to create UART task\n");
+        printf("Falied to create UART task\n");
         while (1) {
         }
     }
 
-    // create Timer task
-<<<<<<< HEAD
-=======
+    //create Timer task
     pthread_attr_setstacksize(&attrs, 512);
->>>>>>> 5bc38fc (ADC Temp Sensor and Reading Working)
     retc = pthread_create(&thread_Timer, &attrs, timerTask, NULL);
     if (retc != 0) {
         printf("Failed to create Timer task\n");
@@ -328,21 +378,16 @@ int main(void)
     }
 
 
-    //timerTask
     //adcTask
-
-
-    
-    // processingTask
+    //processingTask
     pthread_attr_setstacksize(&attrs, 512);
-    static struct processing_config_t processing_config = {
+    struct processing_config_t processing_config = {
         .state = &systemValue,
         .thresh = &THRESH
     };
-    
-    retc = pthread_create(&thread_Processing, &attrs, process_temp_light, &processing_config);
+    retc = pthread_create(&thread_processing, &attrs, process_temp_light, &processing_config);
     if (retc != 0) {
-        printf("Failed to create processing task. retc = %d\n", retc);
+        printf("Failed to create processing task\n");
         while (1) {
         }
     }

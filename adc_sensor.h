@@ -25,7 +25,7 @@
  * If board/jumpers show different channels, only change these 2 lines.
  */
 #define ADC_TEMP_CHANNEL            DL_ADC12_INPUT_CHAN_11
-#define ADC_LIGHT_CHANNEL           DL_ADC12_INPUT_CHAN_7
+#define ADC_LIGHT_CHANNEL           DL_ADC12_INPUT_CHAN_8
 
 
 /* ---------- Public API ---------- */
