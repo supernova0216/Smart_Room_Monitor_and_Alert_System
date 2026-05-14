@@ -50,7 +50,6 @@
 #include <stdarg.h>         //UART_print
 #include "timer_module.h"  
 #include "led_button.h"
-//#include <adc_sensor.h>
 
 
 /* TI includes for driver configuration */
@@ -72,11 +71,6 @@ float readLightPercent(void);
 void *adcTask(void *arg);
 */
 
-
-/*set up Processing, Threshold Logic & Alert Detection
-SystemStatus processSensors(float temp, float light);
-void *processingTask(void *arg);
-*/
 /* Processing test function */
 void testProcessing() {
 
@@ -114,12 +108,6 @@ void testProcessing() {
         delay_cycles(32000000 / 2);
     }
 }
-
-/*set up LED Control + Button Handling
-void updateLEDs(SystemStatus status);
-void *ledButtonTask(void *arg);
-*/
-
 
 //set up UART controller 
 //UART clock configuration
@@ -191,9 +179,6 @@ void *process_temp_light(void* args) {
     }
 }
 
-//task function: LED Control + Button Handling
-
-
 //task function: UART Communication
 void *UARTTask (void *arg0) {
     //initalize UART hardware
@@ -234,7 +219,7 @@ void *UARTTask (void *arg0) {
     UART_sendString("YELLOW - Multiple Alert\r\n");
     vTaskDelay(pdMS_TO_TICKS(2000));
 
-    updateLEDs(NORMAL, MODE_THRESHOLD_ADJUST);
+    updateLEDs(NORMAL, MODE_THRESHOLD_VIEW);
     UART_sendString("BLUE - Config Mode\r\n");
     vTaskDelay(pdMS_TO_TICKS(2000));
 
@@ -243,16 +228,15 @@ void *UARTTask (void *arg0) {
     while (1) {
         //for testing purposes - delete once all tasks combined
         //systemValue.temperature += 0.5;
-        //systemValue.light += 1.0;
+        //systemValue.light += 10.0;
         //systemValue.status = NORMAL;
         //systemValue.sampleNow = true; //timer trigger
-        
+
         // Debug: read raw button states
         bool s1 = DL_GPIO_readPins(GPIOA, DL_GPIO_PIN_18) != 0;
         bool s2 = DL_GPIO_readPins(GPIOB, DL_GPIO_PIN_21) != 0;
         UART_print("S1=%d S2=%d Mode=%d\r\n", s1, s2, getMode());
         handleButtons();
-        updateLEDs(systemValue.status, getMode());
 
         //only print when new sample is ready
         if(systemValue.sampleNow) {
@@ -266,15 +250,16 @@ void *UARTTask (void *arg0) {
             systemValue.light = convertLightRawToPercent(lightRaw);*/
             
             //for testing threshold 
-            //systemValue.temperature += 0.5;
-            //systemValue.light += 1.0;
+            systemValue.temperature += 0.5;
+            systemValue.light += 10.0;
 
             //process logic
-            //systemValue.status = processSensors(&THRESH,systemValue.temperature, systemValue.light);
+            systemValue.status = processSensors(&THRESH,systemValue.temperature, systemValue.light);
 
             //update LEDs
             //updateLEDs(systemValue.status);
             //systemValue.status = NORMAL;            //testing convert adc 
+            updateLEDs(systemValue.status, getMode());
 
             //alternative to print float since UART can only send int
             int temp_int =  (int) systemValue.temperature;
@@ -366,8 +351,6 @@ int main(void)
         while (1) {
         }
     }
-    //LEDTask
-
 
     /* Start the FreeRTOS scheduler */
     vTaskStartScheduler();
