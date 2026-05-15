@@ -11,9 +11,6 @@ OperatingMode currentMode = MODE_MONITOR;
 
 static void setRGB(int r, int g, int b)
 {
-    // For your RGB LED test:
-    // If colors are inverted, swap setPins and clearPins here.
-
     if (r)
         DL_GPIO_setPins(GPIOB, DL_GPIO_PIN_26);
     else

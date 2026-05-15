@@ -106,6 +106,7 @@ void testProcessing() {
     }
 }
 
+
 //set up UART controller 
 //UART clock configuration
 static const DL_UART_Main_ClockConfig gUART_0ClockConfig = {
@@ -194,9 +195,8 @@ void *UARTTask (void *arg0) {
     DL_GPIO_initPeripheralOutputFunction(IOMUX_PINCM21, IOMUX_PINCM21_PF_UART0_TX);
     DL_GPIO_initPeripheralInputFunction(IOMUX_PINCM22, IOMUX_PINCM22_PF_UART0_RX);
 
-    //ADC_Sensor_init();
     //string
-    UART_sendString("System Started\r\n");
+    //UART_sendString("System Started\r\n");
 
     //LED
     LED_Button_Init();
@@ -232,6 +232,7 @@ void *UARTTask (void *arg0) {
     char rxBuf[16];
     int rxIndex = 0;
     bool started = false;
+    char lightOption = '2';    // default = DIM or NORMAL
 
     while (1) {
         //for testing purposes - delete once all tasks combined
@@ -266,6 +267,47 @@ void *UARTTask (void *arg0) {
             vTaskDelay(pdMS_TO_TICKS(50));
             continue;
         }
+
+
+        //UART light level menu
+        if (!DL_UART_isRXFIFOEmpty(UART0)) {
+            char c = DL_UART_Main_receiveData(UART0);
+            
+            if (c == 'a') {
+                UART_print("\r\nSelect Light Level:\r\n");
+                UART_print("1 = Dark\r\n");
+                UART_print("2 = Dim\r\n");
+                UART_print("3 = Normal\r\n");
+                UART_print("4 = Bright\r\n");
+
+                while (DL_UART_isRXFIFOEmpty(UART0));
+
+                lightOption = DL_UART_Main_receiveData(UART0);
+                switch (lightOption) {
+                    case '1':
+                        systemValue.light = 10.0;
+                        break;
+
+                    case '2':
+                        systemValue.light = 40.0;
+                        break;
+
+                    case '3':
+                        systemValue.light = 60.0;
+                        break;
+
+                    case '4':
+                        systemValue.light = 90.0;
+                        break;
+
+                    default:
+                        systemValue.light = 60.0;
+                        break;
+                }
+                UART_print("Light level updated\r\n");
+            }
+        }
+
 
         //system runs
         // Debug: read raw button states
