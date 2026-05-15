@@ -1,9 +1,5 @@
 #include "led_button.h"
-#include "ti_msp_dl_config.h"
-#include <FreeRTOS.h>
-#include <task.h>
-#include <stdbool.h>
-#include <stdint.h>
+#include "UART_UI.h"
 
 #define DEBOUNCE_MS 50
 
@@ -41,18 +37,38 @@ void LED_Button_Init(void)
     DL_GPIO_enableOutput(GPIOB, DL_GPIO_PIN_22); 
 
     // Keep S1 like your original code: pull-down, pressed = 1, PA18
-    DL_GPIO_initDigitalInputFeatures(IOMUX_PINCM40,
+    DL_GPIO_initPeripheralInputFunctionFeatures(IOMUX_PINCM40,
+        IOMUX_PINCM40_PF_GPIOA_DIO18,
         DL_GPIO_INVERSION_DISABLE,
         DL_GPIO_RESISTOR_PULL_DOWN,
         DL_GPIO_HYSTERESIS_DISABLE,
         DL_GPIO_WAKEUP_DISABLE);
 
     // Keep S2 pull-up: pressed = 0, PB21
-    DL_GPIO_initDigitalInputFeatures(IOMUX_PINCM49,
+    DL_GPIO_initPeripheralInputFunctionFeatures(IOMUX_PINCM49,
+        IOMUX_PINCM49_PF_GPIOB_DIO21,
         DL_GPIO_INVERSION_DISABLE,
         DL_GPIO_RESISTOR_PULL_UP,
         DL_GPIO_HYSTERESIS_DISABLE,
         DL_GPIO_WAKEUP_DISABLE);
+
+    DL_GPIO_setUpperPinsPolarity(GPIOA, DL_GPIO_PIN_18_EDGE_RISE_FALL);
+    DL_GPIO_setUpperPinsPolarity(GPIOB, DL_GPIO_PIN_21_EDGE_RISE_FALL);
+
+    // Clear stale interrupt flags first
+    DL_GPIO_clearInterruptStatus(GPIOA, DL_GPIO_PIN_18); // S1
+    DL_GPIO_clearInterruptStatus(GPIOB, DL_GPIO_PIN_21); // S2
+
+    // Enable GPIO pin interrupts
+    DL_GPIO_enableInterrupt(GPIOA, DL_GPIO_PIN_18);
+    DL_GPIO_enableInterrupt(GPIOB, DL_GPIO_PIN_21);
+
+    // Enable interrupt group in NVIC
+    NVIC_ClearPendingIRQ(GPIOA_INT_IRQn);
+    NVIC_ClearPendingIRQ(GPIOB_INT_IRQn);
+
+    NVIC_EnableIRQ(GPIOA_INT_IRQn);
+    NVIC_EnableIRQ(GPIOB_INT_IRQn);
 
     setRGB(0, 0, 0);
 }
@@ -112,52 +128,52 @@ void updateLEDs(SystemStatus status, OperatingMode mode)
     }
 }
 
-static bool btn1LastPressed = false;
-static bool btn2LastPressed = false;
-static TickType_t btn1LastTime = 0;
-static TickType_t btn2LastTime = 0;
-
-void handleButtons(void)
-{
-    TickType_t now = xTaskGetTickCount();
-
-    // S1 uses pull-down:
-    // unpressed = 0
-    // pressed   = 1
-    bool btn1Pressed =
-        (DL_GPIO_readPins(GPIOA, DL_GPIO_PIN_18) != 0);
-
-    // S2 uses pull-up:
-    // unpressed = 1
-    // pressed   = 0
-    bool btn2Pressed =
-        (DL_GPIO_readPins(GPIOB, DL_GPIO_PIN_21) == 0);
-
-    // S1: change mode only once when button is first pressed
-    if (btn1Pressed && !btn1LastPressed)
-    {
-        if ((now - btn1LastTime) >= pdMS_TO_TICKS(DEBOUNCE_MS))
-        {
-            btn1LastTime = now;
-            currentMode = (OperatingMode)((currentMode + 1) % 4);
-        }
-    }
-
-    // S2: reset back to monitor mode
-    if (btn2Pressed && !btn2LastPressed)
-    {
-        if ((now - btn2LastTime) >= pdMS_TO_TICKS(DEBOUNCE_MS))
-        {
-            btn2LastTime = now;
-            currentMode = MODE_MONITOR;
-        }
-    }
-
-    btn1LastPressed = btn1Pressed;
-    btn2LastPressed = btn2Pressed;
-}
-
 OperatingMode getMode(void)
 {
     return currentMode;
+}
+
+void GROUP1_IRQHandler(void)
+{
+    BaseType_t wake = pdFALSE;
+    ButtonEvent event;
+
+    static TickType_t lastS1Tick = 0;
+    static TickType_t lastS2Tick = 0;
+
+    TickType_t now = xTaskGetTickCountFromISR();
+
+    uint32_t s1 = DL_GPIO_getEnabledInterruptStatus(GPIOA, DL_GPIO_PIN_18);
+    uint32_t s2 = DL_GPIO_getEnabledInterruptStatus(GPIOB, DL_GPIO_PIN_21);
+
+    if (s1 & DL_GPIO_PIN_18) {
+        DL_GPIO_clearInterruptStatus(GPIOA, DL_GPIO_PIN_18);
+
+        if ((now - lastS1Tick) >= pdMS_TO_TICKS(BUTTON_DEBOUNCE_MS)) {
+            lastS1Tick = now;
+
+            if (DL_GPIO_readPins(GPIOA, DL_GPIO_PIN_18) != 0) {
+                event = BTN_EVENT_S1_PRESS;
+                xQueueSendFromISR(buttonQueue, &event, &wake);
+            }
+        }
+    }
+
+    if (s2 & DL_GPIO_PIN_21) {
+        DL_GPIO_clearInterruptStatus(GPIOB, DL_GPIO_PIN_21);
+
+        if ((now - lastS2Tick) >= pdMS_TO_TICKS(BUTTON_DEBOUNCE_MS)) {
+            lastS2Tick = now;
+
+            if (DL_GPIO_readPins(GPIOB, DL_GPIO_PIN_21) == 0) {
+                event = BTN_EVENT_S2_PRESS;
+            } else {
+                event = BTN_EVENT_S2_RELEASE;
+            }
+
+            xQueueSendFromISR(buttonQueue, &event, &wake);
+        }
+    }
+
+    portYIELD_FROM_ISR(wake);
 }

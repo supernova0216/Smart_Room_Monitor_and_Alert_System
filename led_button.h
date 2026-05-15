@@ -1,8 +1,19 @@
 #ifndef LED_BUTTON_H
 #define LED_BUTTON_H
 
-#include "system.h"
 #include <stdbool.h>
+#include <semaphore.h>
+#include <FreeRTOS.h>
+#include <task.h>
+#include <stdbool.h>
+#include <stdint.h>
+
+#include "system.h"
+
+#include "ti_msp_dl_config.h"
+
+#define S2_HOLD_MS 500
+#define BUTTON_DEBOUNCE_MS 30
 
 typedef enum {
     MODE_MONITOR,
@@ -15,7 +26,6 @@ extern OperatingMode currentMode;
 
 void LED_Button_Init(void);
 void updateLEDs(SystemStatus status, OperatingMode mode);
-void handleButtons(void);
 OperatingMode getMode(void);
 
 #endif

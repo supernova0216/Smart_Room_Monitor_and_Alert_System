@@ -1,40 +1,10 @@
 /*
- * FreeRTOS V202112.00
- * Copyright (C) 2020 Amazon.com, Inc. or its affiliates.  All Rights Reserved.
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy of
- * this software and associated documentation files (the "Software"), to deal in
- * the Software without restriction, including without limitation the rights to
- * use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of
- * the Software, and to permit persons to whom the Software is furnished to do so,
- * subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in all
- * copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
- * FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
- * COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
- * IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
- * CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
- *
- * http://www.FreeRTOS.org
- * http://aws.amazon.com/freertos
- *
- * 1 tab == 4 spaces!
- */
-
-/******************************************************************************
- * This project provides a POSIX demo using a blinking LED.
- *
- * A POSIX thread controls the blinking LED.
- *
- * This file implements the code that is not demo specific.
+ *  CMPE-146 Semester
  */
 
 /* Standard includes */
 #include <stdio.h>
+#include <string.h>
 
 /* POSIX header files */
 #include <pthread.h>
@@ -42,16 +12,17 @@
 /* RTOS header files */
 #include <FreeRTOS.h>
 #include <task.h>
+#include <semaphore.h>      //POSIX
 
 #include <unistd.h>
-#include <semaphore.h>      //POSIX
 #include <stdlib.h>
 #include <system.h>         //shared set up SystemState
 #include <stdarg.h>         //UART_print
+
 #include "timer_module.h"  
 #include "led_button.h"
 #include "adc_sensor.h"
-
+#include "UART_UI.h"
 
 /* TI includes for driver configuration */
 #include "ti_msp_dl_config.h"
@@ -59,321 +30,176 @@
 extern void *Thread(void *arg0);
 
 /* Stack size in bytes */
-#define THREADSTACKSIZE 1024
-//#define configTOTAL_HEAP_SIZE (12 * 1024)
+#define THREADSTACKSIZE        1024
+#define UART_STACK_SIZE        4096
+#define TIMER_STACK_SIZE       1024
+#define PROCESSING_STACK_SIZE  2048
 
 struct processing_config_t {
     SystemState* state;
     THRESHOLDS* thresh;
 };
 
+// Global Semaphores
+sem_t temp_request_sem;   // UART -> processing
+sem_t temp_done_sem;      // processing -> UART
+sem_t state_mutex;        // shared systemValue protection
 
-/* Processing test function */
-void testProcessing() {
+volatile bool s2Pressed = false;
+volatile bool s2Released = false;
 
-    float test_temp = 0;
-    float test_light = 500;
-    for (int i = 0; i < 20; i++) {
-        test_temp += (float) (i * 5);
-        int status = processSensors(&THRESH, test_temp, test_light);
-        printf("Temp Status: ");
-        printStatus(status);
-        printf("\n");
-        delay_cycles(32000000 / 2);
-    }
+QueueHandle_t buttonQueue;
 
-    test_temp = 25;
-    test_light = 0;
-    for (int i = 0; i < 30; i++) {
-        test_light += (float) (i * 1000);
-        int status = processSensors(&THRESH, test_temp, test_light);
-        printf("Light Status: ");
-        printStatus(status);
-        printf("\n");
-        delay_cycles(32000000 / 2);
-    }
-    
-    test_temp = 0;
-    test_light = 0;
-    for (int i = 0; i < 30; i++) {
-        test_temp += (float) (i * 5);
-        test_light += (float) (i * 1000);
-        int status = processSensors(&THRESH, test_temp, test_light);
-        printf("Overall Status: ");
-        printStatus(status);
-        printf("\n");
-        delay_cycles(32000000 / 2);
-    }
-}
+volatile MenuOption currentMenu = MENU_UPDATE_THRESH;
+volatile MenuEvent menuEvent = MENU_EVENT_NONE;
+
+volatile LightOption currentLightMenu = LIGHT_NORMAL;
+volatile bool inLightMenu = false;
+
+volatile bool inThresholdMenu = false;
+volatile bool editingThreshold = false;
+volatile ThresholdMenuOptions currentThresholdMenu = THRESH_MENU_TEMP_LOW;
+
+char thresholdInputBuf[16];
+uint8_t thresholdInputIndex = 0;
+
+AlertLogEntry alertLog[ALERT_LOG_SIZE];
+
+volatile uint8_t alertLogHead = 0;
+volatile uint8_t alertLogCount = 0;
+volatile uint32_t alertSampleCounter = 0;
+
+volatile bool inAlertLogMenu = false;
 
 
-//set up UART controller 
-//UART clock configuration
-static const DL_UART_Main_ClockConfig gUART_0ClockConfig = {
-    .clockSel = DL_UART_MAIN_CLOCK_BUSCLK,
-    .divideRatio = DL_UART_MAIN_CLOCK_DIVIDE_RATIO_1
-};
-//UART communication parameters
-static const DL_UART_Main_Config gUART_0Config = {
-    .mode = DL_UART_MAIN_MODE_NORMAL,
-    .direction = DL_UART_MAIN_DIRECTION_TX_RX,
-    .flowControl = DL_UART_MAIN_FLOW_CONTROL_NONE,
-    .parity = DL_UART_MAIN_PARITY_NONE,
-    .wordLength = DL_UART_MAIN_WORD_LENGTH_8_BITS,
-    .stopBits = DL_UART_MAIN_STOP_BITS_ONE
-};
-//UART helper funcs
-void UART_sendChar (char c) {
-    while (DL_UART_isTXFIFOFull(UART0));    //wait until TX is ready
-    DL_UART_Main_transmitData(UART0, c);    //echo  
-}
-void UART_sendString (char *str) {
-    int i = 0;
-    while (str[i] != '\0'){
-        UART_sendChar(str[i]);  //wait til TX buffer not full and send one character to UART
-        i++; 
-    }
-}
-void UART_print(char *msg, ...) {
-    char buffer[128];       
-    va_list args;       //holds var passed arguments
-    va_start(args, msg);        //initialize args to point to first variable argument
-    vsnprintf(buffer, sizeof(buffer), msg, args);       //format the string into buffer, preventing overflow
-    va_end(args);       //cleanup handling
-    UART_sendString(buffer);
-}
+/* Page/Event Handler Prototypes */
+static MenuEvent get_button_event();
+static void handle_main_menu(MenuEvent event);
+static void handle_threshold_menu(MenuEvent event);
+static void handle_light_menu(MenuEvent event);
+static void handle_alert_log_menu(MenuEvent event);
+
+static void handle_threshold_input();
+static void append_alert_log(float temp, float light, SystemStatus status);
+
 
 /* Set up the hardware ready to run this demo */
 static void prvSetupHardware(void) {
     SYSCFG_DL_init();
 
+    init_UART();
+    LED_Button_Init();
     ADC_Sensor_init();
+    
     // Init temp thresh with Celsius. Change to F variants if Farenheit is desired.
     initThresholds(&THRESH, TEMP_LOW_C, TEMP_HIGH_C, LIGHT_LOW_L, LIGHT_HIGH_L);
 };
 
+// Handle Sample Timing
+void* timerTask(void* arg0) {
+    while (1) {
+        vTaskDelay(pdMS_TO_TICKS(1000));   // sample every 1 second
 
-//task function: Processing, Threshold Logic & Alert Detection
-void *process_temp_light(void* args) {
+        sem_wait(&state_mutex);
+        systemValue.sampleNow = true;
+        sem_post(&state_mutex);
 
+        // Request processing directly
+        sem_post(&temp_request_sem);
+    }
+
+    return NULL;
+}
+
+// Processing, Threshold Logic & Alert Detection
+void* process_temp(void* args) {
     struct processing_config_t* config = (struct processing_config_t*) args;
     SystemState* n_state = config->state;
-    SystemStatus p_status;
 
-    while(1) {
-        // Wait for state temp and/or light to change
-        // sem_wait(&state_semaphore) // Change "state_semaphore" to name of actual state semaphore being used.
+    while (1) {
+        // Wait until UART says a sample should be processed
+        sem_wait(&temp_request_sem);
 
-        // Get new state then post change to state semaphore if status has changed
-        p_status = n_state->status;
-        n_state->status = processSensors(config->thresh, n_state->temperature, n_state->light);
-        // if (p_status != n_state->status) sem_post(&state_semaphore);
+        sem_wait(&state_mutex);
 
-        // Debug
-        // printf("Old status: %d | New status: %d\n", p_status, n_state->status);
+        n_state->sampleNow = false;
 
-        usleep(100000); // Delay 0.1s to allow state change to be read by other tasks.
+        float tempC = readTemperatureC();
+        n_state->temperature = tempC;
+
+        n_state->status = processSensors(
+            config->thresh,
+            n_state->temperature,
+            n_state->light
+        );
+
+        append_alert_log(
+            n_state->temperature,
+            n_state->light,
+            n_state->status
+        );
+
+        updateLEDs(n_state->status, getMode());
+
+        sem_post(&state_mutex);
+
+        // Tell UART processing is complete
+        sem_post(&temp_done_sem);
     }
+
+    return NULL;
 }
 
 //task function: UART Communication
 void *UARTTask (void *arg0) {
-    //initalize UART hardware
-    DL_UART_Main_reset(UART0);
-    DL_UART_Main_enablePower(UART0);
-    delay_cycles(POWER_STARTUP_DELAY);
-    DL_UART_Main_setClockConfig(UART0, (DL_UART_Main_ClockConfig *) &gUART_0ClockConfig);      //choose clock signal to be used on the controller
-    DL_UART_Main_init(UART0, (DL_UART_Main_Config *) &gUART_0Config);       //sets communication parameters
-    
-    //determine baud rate to be used
-    DL_UART_Main_setOversampling(UART0, DL_UART_OVERSAMPLING_RATE_16X);     
-    DL_UART_Main_setBaudRateDivisor(UART0, 17, 23);
-    
-    DL_UART_Main_enable(UART0);     //enable UART
 
-    //pins configuration
-    DL_GPIO_initPeripheralOutputFunction(IOMUX_PINCM21, IOMUX_PINCM21_PF_UART0_TX);
-    DL_GPIO_initPeripheralInputFunction(IOMUX_PINCM22, IOMUX_PINCM22_PF_UART0_RX);
+    run_status_test();
 
-    //string
-    //UART_sendString("System Started\r\n");
-
-    //LED
-    LED_Button_Init();
-
-    UART_sendString("Testing LEDs...\r\n");
-
-    updateLEDs(NORMAL, MODE_MONITOR);
-    UART_sendString("GREEN - Normal\r\n");
-    vTaskDelay(pdMS_TO_TICKS(2000));
-
-    updateLEDs(TEMP_HIGH, MODE_MONITOR);
-    UART_sendString("RED - Alert High Temp\r\n");
-    vTaskDelay(pdMS_TO_TICKS(2000));
-
-    updateLEDs(TEMP_LOW, MODE_MONITOR);
-    UART_sendString("BLUE - Alert Low Temp\r\n");
-    vTaskDelay(pdMS_TO_TICKS(2000));
-
-    updateLEDs(LIGHT_HIGH, MODE_MONITOR);
-    UART_sendString("YELLOW - Alert Bright Light\r\n");
-    vTaskDelay(pdMS_TO_TICKS(2000));
-
-    updateLEDs(LIGHT_LOW, MODE_MONITOR);
-    UART_sendString("CYAN - Alert Low Light\r\n");
-    vTaskDelay(pdMS_TO_TICKS(2000));
-
-    updateLEDs(MULTIPLE_ALERT, MODE_MONITOR);
-    UART_sendString("PURPLE - Multiple Alert\r\n");
-    vTaskDelay(pdMS_TO_TICKS(2000));
-
-    UART_sendString("LED test done!\r\n");
-
-    char rxBuf[16];
-    int rxIndex = 0;
     bool started = false;
-    char lightOption = '2';    // default = DIM or NORMAL
 
     while (1) {
-        //for testing purposes - delete once all tasks combined
-        //systemValue.temperature += 0.5;
-        //systemValue.light += 10.0;
-        //systemValue.status = NORMAL;
-        //systemValue.sampleNow = true; //timer trigger
 
-        
-        // Wait for START command
         if (!started) {
-            if (!DL_UART_isRXFIFOEmpty(UART0)) {
-                char c = DL_UART_Main_receiveData(UART0);   //read the received character  
-                while (DL_UART_isTXFIFOFull(UART0));
-                DL_UART_Main_transmitData(UART0, c);    //echo; send the same character back 
-                
-                // end of command
-                if (c == '\r' || c == '\n') {
-                    rxBuf[rxIndex] = '\0';
-                    if (strcmp(rxBuf, "start") == 0) {
-                        UART_print("\r\nSYSTEM STARTED\r\n");
-                        started = true;
-                    } else {
-                        UART_print("\r\nType 'start' only\r\n");
-                    }
-                    rxIndex = 0;
-                }
-                else if (rxIndex < sizeof(rxBuf) - 1) {
-                    rxBuf[rxIndex++] = c;
-                }
-            }
-            vTaskDelay(pdMS_TO_TICKS(50));
+            UART_print("\r\nSYSTEM STARTED\r\n");
+            show_main_menu();
+            started = true;
+        }
+
+        MenuEvent event = get_button_event();
+
+        /* Alert page first */
+        if (inAlertLogMenu) {
+            handle_alert_log_menu(event);
+            vTaskDelay(pdMS_TO_TICKS(100));
             continue;
         }
 
-
-        //UART light level menu
-        if (!DL_UART_isRXFIFOEmpty(UART0)) {
-            char c = DL_UART_Main_receiveData(UART0);
-            
-            if (c == 'a') {
-                UART_print("\r\nSelect Light Level:\r\n");
-                UART_print("1 = Dark\r\n");
-                UART_print("2 = Dim\r\n");
-                UART_print("3 = Normal\r\n");
-                UART_print("4 = Bright\r\n");
-
-                while (DL_UART_isRXFIFOEmpty(UART0));
-
-                lightOption = DL_UART_Main_receiveData(UART0);
-                switch (lightOption) {
-                    case '1':
-                        systemValue.light = 10.0;
-                        break;
-
-                    case '2':
-                        systemValue.light = 40.0;
-                        break;
-
-                    case '3':
-                        systemValue.light = 60.0;
-                        break;
-
-                    case '4':
-                        systemValue.light = 90.0;
-                        break;
-
-                    default:
-                        systemValue.light = 60.0;
-                        break;
-                }
-                UART_print("Light level updated\r\n");
-            }
+        /* Threshold page second */
+        if (inThresholdMenu) {
+            handle_threshold_menu(event);
+            vTaskDelay(pdMS_TO_TICKS(20));
+            continue;
         }
 
-
-        //system runs
-        // Debug: read raw button states
-        bool s1 = DL_GPIO_readPins(GPIOA, DL_GPIO_PIN_18) != 0;
-        bool s2 = DL_GPIO_readPins(GPIOB, DL_GPIO_PIN_21) != 0;
-        UART_print("S1=%d S2=%d Mode=%d\r\n", s1, s2, getMode());
-        handleButtons();
-
-        //only print when new sample is ready
-        if(systemValue.sampleNow) {
-            systemValue.sampleNow = false;
-            UART_print("Timer tick\r\n");       //testing timer - remove once finished
-
-            //read sensor
-            /*uint16_t tempRaw = readTemperatureRaw();
-            uint16_t lightRaw = readLightRaw();
-            systemValue.temperature = convertTemperatureRawToC(tempRaw);            
-            systemValue.light = convertLightRawToPercent(lightRaw);*/
-            float tempC = readTemperatureC();
-            systemValue.temperature = tempC;
-
-            
-            //for testing threshold 
-            //systemValue.temperature += 0.5;
-            //systemValue.light += 10.0;
-
-            //process logic
-            systemValue.status = processSensors(&THRESH,systemValue.temperature, systemValue.light);
-
-            //update LEDs
-            //updateLEDs(systemValue.status);
-            //systemValue.status = NORMAL;            //testing convert adc 
-            updateLEDs(systemValue.status, getMode());
-
-            //alternative to print float since UART can only send int
-            int temp_int =  (int) systemValue.temperature;
-            int temp_decimal = (int) ((systemValue.temperature - temp_int) * 100);
-            if (temp_decimal < 0) {
-                temp_decimal = -temp_decimal;
-            }
-
-            int light_int = (int) systemValue.light;
-            int light_decimal = (int) ((systemValue.light - light_int) * 100);
-            if (light_decimal < 0) {
-                light_decimal = -light_decimal;
-            }
-            
-            //UART_print("Test int: %d\r\n", 123);      //test to check UART_print
-            //UART_print("Temperature: %d.%02d C  (Raw:%u) | Light: %d.%02d %%  (Raw:%u) | Status: %d\r\n",
-            //            temp_int, temp_decimal, tempRaw, light_int, light_decimal, lightRaw, systemValue.status);
-            UART_print("Temperature: %d.%02d C  | Light: %d.%02d %%  | Status: %d\r\n",
-                        temp_int, temp_decimal, light_int, light_decimal, systemValue.status);
+        /* Light page third */
+        if (inLightMenu) {
+            handle_light_menu(event);
+            vTaskDelay(pdMS_TO_TICKS(20));
+            continue;
         }
-        
-        vTaskDelay(pdMS_TO_TICKS(900));     //prevent CPU hogging, printing speed
+
+        /* Main menu last */
+        handle_main_menu(event);
+
+        vTaskDelay(pdMS_TO_TICKS(20));
     }
+
     return NULL;
 }
 
 
 int main(void)
 {
-    // // Threshold Testing
-    // prvSetupHardware();
-    // testProcessing();
-    // while(1);
 
     pthread_t thread_UART, thread_Timer, thread_processing;
     pthread_attr_t attrs;
@@ -384,6 +210,17 @@ int main(void)
 #ifdef __ICCARM__
     __iar_Initlocks();
 #endif
+
+    buttonQueue = xQueueCreate(16, sizeof(ButtonEvent));
+    if (buttonQueue == NULL) {
+        printf("Button Queue failed to create.\n");
+        while (1);
+    }
+
+    /* Init semaphores */
+    sem_init(&temp_request_sem, 0, 0);
+    sem_init(&temp_done_sem, 0, 0);
+    sem_init(&state_mutex, 0, 1);
 
     /* Prepare the hardware to run this demo. */
     prvSetupHardware();
@@ -398,38 +235,39 @@ int main(void)
     retc |= pthread_attr_setstacksize(&attrs, THREADSTACKSIZE);
     if (retc != 0) {
         /* failed to set attributes */
-        printf("Failed to set thread attributes\n");
+        printf("Failed to set thread attributes. Code: %d\n", retc);
         while (1) {
         }
     }
+    
     //create UART task 
-    pthread_attr_setstacksize(&attrs, 1024);
+    pthread_attr_setstacksize(&attrs, UART_STACK_SIZE);
     retc = pthread_create(&thread_UART, &attrs, UARTTask, NULL);
     if (retc != 0) {
         /* pthread_create() failed */
-        printf("Falied to create UART task\n");
+        printf("Falied to create UART task. Code: %d\n", retc);
         while (1) {
         }
     }
 
     //create Timer task
-    pthread_attr_setstacksize(&attrs, 512);
+    pthread_attr_setstacksize(&attrs, TIMER_STACK_SIZE);
     retc = pthread_create(&thread_Timer, &attrs, timerTask, NULL);
     if (retc != 0) {
-        printf("Failed to create Timer task\n");
+        printf("Failed to create Timer task. Code: %d\n", retc);
         while (1) {
         }
     }
 
     //processingTask
-    pthread_attr_setstacksize(&attrs, 512);
-    struct processing_config_t processing_config = {
+    pthread_attr_setstacksize(&attrs, PROCESSING_STACK_SIZE);
+    static struct processing_config_t processing_config = {
         .state = &systemValue,
         .thresh = &THRESH
     };
-    retc = pthread_create(&thread_processing, &attrs, process_temp_light, &processing_config);
+    retc = pthread_create(&thread_processing, &attrs, process_temp, &processing_config);
     if (retc != 0) {
-        printf("Failed to create processing task\n");
+        printf("Failed to create processing task. Code: %d\n", retc);
         while (1) {
         }
     }
@@ -438,4 +276,235 @@ int main(void)
     vTaskStartScheduler();
 
     return (0);
+}
+
+
+/* Event Handlers */
+
+static MenuEvent get_button_event() {
+    static TickType_t s2PressTick = 0;
+    static bool s2PressedValid = false;
+
+    ButtonEvent btnEvent;
+
+    if (xQueueReceive(buttonQueue, &btnEvent, 0) != pdTRUE) {
+        return MENU_EVENT_NONE;
+    }
+
+    switch (btnEvent) {
+        case BTN_EVENT_S1_PRESS:
+            return MENU_EVENT_UP;
+
+        case BTN_EVENT_S2_PRESS:
+            s2PressTick = xTaskGetTickCount();
+            s2PressedValid = true;
+            return MENU_EVENT_NONE;
+
+        case BTN_EVENT_S2_RELEASE:
+            if (!s2PressedValid) {
+                return MENU_EVENT_NONE;
+            }
+
+            s2PressedValid = false;
+
+            if ((xTaskGetTickCount() - s2PressTick) >= pdMS_TO_TICKS(S2_HOLD_MS)) {
+                return MENU_EVENT_SELECT;
+            }
+
+            return MENU_EVENT_DOWN;
+
+        default:
+            return MENU_EVENT_NONE;
+    }
+}
+
+static void handle_main_menu(MenuEvent event) {
+    if (event == MENU_EVENT_UP) {
+        currentMenu = (currentMenu == 0) ? MENU_COUNT - 1 : currentMenu - 1;
+        show_main_menu();
+    }
+    else if (event == MENU_EVENT_DOWN) {
+        currentMenu = (currentMenu + 1) % MENU_COUNT;
+        show_main_menu();
+    }
+    else if (event == MENU_EVENT_SELECT) {
+        switch (currentMenu) {
+            case MENU_UPDATE_THRESH:
+                xQueueReset(buttonQueue);
+                inThresholdMenu = true;
+                editingThreshold = false;
+                currentThresholdMenu = THRESH_MENU_TEMP_LOW;
+                show_threshold_menu();
+                break;
+
+            case MENU_CHANGE_LIGHT:
+                inLightMenu = true;
+                show_light_menu();
+                break;
+
+            case MENU_VIEW_ALERT_LOG:
+                inAlertLogMenu = true;
+                show_alert_log_menu();
+                break;
+
+            default:
+                break;
+        }
+    }
+}
+
+static void handle_threshold_menu(MenuEvent event)
+{
+    if (editingThreshold) {
+        handle_threshold_input();
+
+        if (event == MENU_EVENT_SELECT) {
+            editingThreshold = false;
+            thresholdInputIndex = 0;
+            thresholdInputBuf[0] = '\0';
+            show_threshold_menu();
+        }
+
+        return;
+    }
+
+    if (!DL_UART_isRXFIFOEmpty(UART0)) {
+        char c = (char)DL_UART_Main_receiveData(UART0);
+
+        if (c == 'b' || c == 'B') {
+            inThresholdMenu = false;
+            editingThreshold = false;
+            show_main_menu();
+            return;
+        }
+    }
+
+    if (event == MENU_EVENT_UP) {
+        currentThresholdMenu =
+            (currentThresholdMenu == 0)
+            ? THRESH_MENU_COUNT - 1
+            : currentThresholdMenu - 1;
+
+        show_threshold_menu();
+    }
+    else if (event == MENU_EVENT_DOWN) {
+        currentThresholdMenu =
+            (currentThresholdMenu + 1) % THRESH_MENU_COUNT;
+
+        show_threshold_menu();
+    }
+    else if (event == MENU_EVENT_SELECT) {
+        if (currentThresholdMenu == THRESH_MENU_BACK) {
+            inThresholdMenu = false;
+            editingThreshold = false;
+            show_main_menu();
+            return;
+        }
+
+        begin_threshold_edit();
+    }
+}
+
+static void handle_light_menu(MenuEvent event) {
+    if (event == MENU_EVENT_UP) {
+        currentLightMenu =
+            (currentLightMenu == 0)
+            ? LIGHT_COUNT - 1
+            : currentLightMenu - 1;
+
+        show_light_menu();
+    }
+    else if (event == MENU_EVENT_DOWN) {
+        currentLightMenu = (currentLightMenu + 1) % LIGHT_COUNT;
+        show_light_menu();
+    }
+    else if (event == MENU_EVENT_SELECT) {
+        sem_wait(&state_mutex);
+
+        switch (currentLightMenu) {
+            case LIGHT_DARK:   systemValue.light = 10.0; break;
+            case LIGHT_DIM:    systemValue.light = 40.0; break;
+            case LIGHT_NORMAL: systemValue.light = 60.0; break;
+            case LIGHT_BRIGHT: systemValue.light = 90.0; break;
+            default:           systemValue.light = 60.0; break;
+        }
+
+        sem_post(&state_mutex);
+
+        inLightMenu = false;
+        UART_print("\r\nLight level updated.\r\n");
+        show_main_menu();
+    }
+}
+
+static void handle_alert_log_menu(MenuEvent event) {
+    if (sem_trywait(&temp_done_sem) == 0) {
+        show_alert_log_menu();
+    }
+
+    if (event == MENU_EVENT_SELECT) {
+        inAlertLogMenu = false;
+        show_main_menu();
+        return;
+    }
+
+    if (event == MENU_EVENT_UP || event == MENU_EVENT_DOWN) {
+        show_alert_log_menu();
+    }
+}
+
+static void handle_threshold_input() {
+    if (!DL_UART_isRXFIFOEmpty(UART0)) {
+        char c = (char)DL_UART_Main_receiveData(UART0);
+
+        // Enter: commit value
+        if (c == '\r' || c == '\n') {
+            thresholdInputBuf[thresholdInputIndex] = '\0';
+
+            float newVal = atof(thresholdInputBuf);
+
+            if (currentThresholdMenu == THRESH_MENU_TEMP_LOW) {
+                updateThreshold(&THRESH, THRESHOLD_TEMP_LOW, newVal);
+            }
+            else if (currentThresholdMenu == THRESH_MENU_TEMP_HIGH) {
+                updateThreshold(&THRESH, THRESHOLD_TEMP_HIGH, newVal);
+            }
+
+            editingThreshold = false;
+            thresholdInputIndex = 0;
+            thresholdInputBuf[0] = '\0';
+
+            show_threshold_menu();
+        }
+
+        // Backspace/delete
+        else if ((c == '\b' || c == 127) && thresholdInputIndex > 0) {
+            thresholdInputIndex--;
+            thresholdInputBuf[thresholdInputIndex] = '\0';
+
+            UART_print("\b \b");
+        }
+
+        // Valid numeric input
+        else if (((c >= '0' && c <= '9') || c == '.') &&
+                 thresholdInputIndex < sizeof(thresholdInputBuf) - 1) {
+            thresholdInputBuf[thresholdInputIndex++] = c;
+            thresholdInputBuf[thresholdInputIndex] = '\0';
+
+            UART_print("%c", c);
+        }
+    }
+}
+
+static void append_alert_log(float temp, float light, SystemStatus status) {
+    alertLog[alertLogHead].temperature = temp;
+    alertLog[alertLogHead].light = light;
+    alertLog[alertLogHead].status = status;
+    alertLog[alertLogHead].sampleNumber = ++alertSampleCounter;
+
+    alertLogHead = (alertLogHead + 1) % ALERT_LOG_SIZE;
+
+    if (alertLogCount < ALERT_LOG_SIZE) {
+        alertLogCount++;
+    }
 }
