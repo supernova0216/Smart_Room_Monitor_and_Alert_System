@@ -67,11 +67,6 @@ struct processing_config_t {
     THRESHOLDS* thresh;
 };
 
-/*set up ADC & Sensor Reading Module
-float readTemperatureC(void);
-float readLightPercent(void);
-void *adcTask(void *arg);
-*/
 
 /* Processing test function */
 void testProcessing() {
@@ -156,8 +151,6 @@ static void prvSetupHardware(void) {
     initThresholds(&THRESH, TEMP_LOW_C, TEMP_HIGH_C, LIGHT_LOW_L, LIGHT_HIGH_L);
 };
 
-//task function: ADC & Sensor Reading Module
-
 
 //task function: Processing, Threshold Logic & Alert Detection
 void *process_temp_light(void* args) {
@@ -201,6 +194,7 @@ void *UARTTask (void *arg0) {
     DL_GPIO_initPeripheralOutputFunction(IOMUX_PINCM21, IOMUX_PINCM21_PF_UART0_TX);
     DL_GPIO_initPeripheralInputFunction(IOMUX_PINCM22, IOMUX_PINCM22_PF_UART0_RX);
 
+    //ADC_Sensor_init();
     //string
     UART_sendString("System Started\r\n");
 
@@ -214,18 +208,26 @@ void *UARTTask (void *arg0) {
     vTaskDelay(pdMS_TO_TICKS(2000));
 
     updateLEDs(TEMP_HIGH, MODE_MONITOR);
-    UART_sendString("RED - Alert\r\n");
+    UART_sendString("RED - Alert High Temp\r\n");
+    vTaskDelay(pdMS_TO_TICKS(2000));
+
+    updateLEDs(TEMP_LOW, MODE_MONITOR);
+    UART_sendString("BLUE - Alert Low Temp\r\n");
+    vTaskDelay(pdMS_TO_TICKS(2000));
+
+    updateLEDs(LIGHT_HIGH, MODE_MONITOR);
+    UART_sendString("YELLOW - Alert Bright Light\r\n");
+    vTaskDelay(pdMS_TO_TICKS(2000));
+
+    updateLEDs(LIGHT_LOW, MODE_MONITOR);
+    UART_sendString("CYAN - Alert Low Light\r\n");
     vTaskDelay(pdMS_TO_TICKS(2000));
 
     updateLEDs(MULTIPLE_ALERT, MODE_MONITOR);
-    UART_sendString("YELLOW - Multiple Alert\r\n");
+    UART_sendString("PURPLE - Multiple Alert\r\n");
     vTaskDelay(pdMS_TO_TICKS(2000));
 
-    updateLEDs(NORMAL, MODE_THRESHOLD_VIEW);
-    UART_sendString("BLUE - Config Mode\r\n");
-    vTaskDelay(pdMS_TO_TICKS(2000));
-
-    UART_sendString("LED test done! Now testing buttons...\r\n");
+    UART_sendString("LED test done!\r\n");
 
     char rxBuf[16];
     int rxIndex = 0;
@@ -377,8 +379,6 @@ int main(void)
         }
     }
 
-
-    //adcTask
     //processingTask
     pthread_attr_setstacksize(&attrs, 512);
     struct processing_config_t processing_config = {

@@ -5,12 +5,12 @@
 #include "ti/driverlib/driverlib.h"
 
 /* Default threshold values */
-#define TEMP_LOW_F      61.0
-#define TEMP_LOW_C      16.0
-#define TEMP_HIGH_F     85.0
-#define TEMP_HIGH_C     29.0
-#define LIGHT_LOW_L     250.0
-#define LIGHT_HIGH_L    25000.0
+#define TEMP_LOW_F      75.2 //61.0
+#define TEMP_LOW_C      24.0 //16.0
+#define TEMP_HIGH_F     80.6 //85.0
+#define TEMP_HIGH_C     27.5 //29.0
+#define LIGHT_LOW_L     20.0 //250.0
+#define LIGHT_HIGH_L    80.0 //25000.0
 
 /* Threshold type enumerations */
 typedef enum {

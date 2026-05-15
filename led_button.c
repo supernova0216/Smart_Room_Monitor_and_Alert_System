@@ -63,16 +63,32 @@ void LED_Button_Init(void)
 void updateLEDs(SystemStatus status, OperatingMode mode)
 {
     //uncommented after done integrating adc for alert overide
-    if (status == TEMP_HIGH || status == TEMP_LOW || status == LIGHT_LOW
-        || status == LIGHT_HIGH || status == MULTIPLE_ALERT) 
-    {
-        if (status == MULTIPLE_ALERT) {
-            setRGB(1, 1, 0);   // yellow for multiple alert
-            return;
-        } else {
-            setRGB(1, 0, 0);    //set red for any other alert
-            return;
+    if (status != NORMAL) {
+        switch (status) {
+            case TEMP_HIGH:
+                setRGB(1, 0, 0);    // red
+                break;
+            
+            case TEMP_LOW:
+                setRGB(0, 0, 1);    // blue
+                break;
+
+            case LIGHT_HIGH:
+                setRGB(1, 1, 0);    // yellow
+                break;
+
+            case LIGHT_LOW:
+                setRGB(0, 1, 1);    // cyan
+                break;
+
+            case MULTIPLE_ALERT:
+                setRGB(1, 0, 1);    // purple
+                break;
+
+            default:
+                break;
         }
+        return;
     }
     //normal mode display
     switch (mode)
